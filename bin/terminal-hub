@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# terminal-hub: the session picker that ttyd runs (with --url-arg) behind the hub page.
+# Lists the tmux sessions of every place in ~/.config/terminal-hub/config; pick one to attach.
+#
+#   /                 pick a session: tap or type to filter, enter to open
+#   /?arg=new         new session in the first place ("here")
+#   /?arg=NAME        session NAME here, created if needed
+#   /?arg=KEY:NAME    session NAME in place KEY, created if needed (KEY:new for a new one)
+#
+# install.sh copies this to ~/.local/bin; edit the copy in the repo.
+FZF=$(command -v fzf) || FZF=$HOME/.fzf/bin/fzf
+CONFIG=$HOME/.config/terminal-hub/config
+
+fail() { echo "$1"; sleep 5; exit 1; }  # the pause keeps the message on screen before ttyd closes
+
+HUB_PROMPT='hub > ' HUB_HEADER='tap a session or type to filter'
+KEY=() LABEL=() COLOUR=() KIND=() ARGS=()
+place() {  # place KEY LABEL COLOUR local|ssh|via [ARGS...]: see config.example
+  [[ $1 =~ ^[A-Za-z0-9_-]+$ ]] || fail "bad place key in $CONFIG: $1 (letters, digits, - and _ only)"
+  KEY+=("$1") LABEL+=("$2") COLOUR+=("$3") KIND+=("$4") ARGS+=("${*:5}")
+}
+[[ -f $CONFIG ]] && source "$CONFIG"
+((${#KEY[@]})) || place here "$(hostname)" '#7ee787' local
+
+fmt='#{session_name}	#{session_windows} win#{?session_attached, · attached,}'
+
+# list I: place I's sessions as "name<TAB>info" lines. Fails only if the place can't be
+# reached; no sessions (no tmux server at all) is fine, hence the `exit 0`s.
+list() {
+  local a
+  read -ra a <<<"${ARGS[$1]}"
+  case ${KIND[$1]} in
+    local) tmux list-sessions -F "$fmt" 2>/dev/null; return 0 ;;
+    via) "${a[@]}" "tmux list-sessions -F '$fmt' 2>/dev/null; exit 0" 2>/dev/null ;;
+    ssh) timeout 8 ssh -o ConnectTimeout=5 -o BatchMode=yes "${a[0]}" \
+      "${a[*]:1} tmux list-sessions -F '$fmt' 2>/dev/null; exit 0" 2>/dev/null ;;
+    *) return 1 ;;
+  esac
+}
+
+# open I NAME: attach to session NAME in place I, creating it in the home directory if it's
+# gone. $HOME is expanded where tmux runs, so it's the right user's.
+open() {
+  local a cmd="exec tmux new-session -A -s $2 -c \"\$HOME\""
+  read -ra a <<<"${ARGS[$1]}"
+  case ${KIND[$1]} in
+    local) exec tmux new-session -A -s "$2" -c "$HOME" ;;
+    via) exec "${a[@]}" "$cmd" ;;
+    ssh)
+      ((${#a[@]} > 1)) && cmd="${a[*]:1} sh -c '$cmd'"
+      exec ssh -t -o ConnectTimeout=6 -o ServerAliveInterval=15 "${a[0]}" "$cmd"
+      ;;
+  esac
+  fail "place ${KEY[$1]}: unknown kind '${KIND[$1]}' (local, ssh or via)"
+}
+
+valid() {
+  [[ $1 =~ ^[A-Za-z0-9_-]{1,32}$ ]] || fail "invalid session name: $1 (letters, digits, - and _ only)"
+}
+# First of phone, phone-2, phone-3... not among the session names on stdin.
+unique() {
+  local taken name=phone i=2
+  taken=$(cut -f1)
+  while grep -qxF -- "$name" <<<"$taken"; do name="phone-$((i++))"; done
+  echo "$name"
+}
+find_place() {
+  local i
+  for i in "${!KEY[@]}"; do [[ ${KEY[i]} == "$1" ]] && echo "$i" && return 0; done
+  return 1
+}
+go() {  # go I NAME|new
+  [[ $2 == new ]] && open "$1" "$(list "$1" | unique)"
+  valid "$2"
+  open "$1" "$2"
+}
+
+case ${1:-} in
+  '') ;;
+  *:*) i=$(find_place "${1%%:*}") || fail "no place called ${1%%:*} in $CONFIG"; go "$i" "${1#*:}" ;;
+  *) go 0 "$1" ;;
+esac
+
+# The picker. Rows are "kind<TAB>id<TAB>shown text"; fzf shows only the text.
+rgb() { local h=${1#\#}; printf '\e[38;2;%d;%d;%dm' "0x${h:0:2}" "0x${h:2:2}" "0x${h:4:2}"; }
+GREY=$(rgb '#8b949e') OFF=$'\e[0m'
+TW=0
+for l in "${LABEL[@]}"; do ((${#l} > TW)) && TW=${#l}; done
+((TW++))
+row() { printf '%s\t%s\t%s%-*s%s%s\n' "$1" "$2" "$3" "$TW" "$4" "$OFF" "$5"; }  # KIND ID COLOUR TAG TEXT
+sessions() {  # sessions I WIDTH < "name<TAB>info" lines
+  local name info c
+  c=$(rgb "${COLOUR[$1]}")
+  while IFS=$'\t' read -r name info; do
+    [[ -n $name ]] && row s "$1:$name" "$c" "${LABEL[$1]}" "$(printf "%-${2}s  %s%s%s" "$name" "$GREY" "$info" "$OFF")"
+  done
+}
+COLORS='fg:#d6dae0,bg:#0b0d10,hl:#7ee787,fg+:#ffffff,bg+:#1c2027,hl+:#7ee787,info:#8b949e,prompt:#7ee787,pointer:#7ee787,marker:#7ee787,header:#8b949e,gutter:#0b0d10,border:#22262c'
+
+while true; do
+  out=() ok=()
+  for i in "${!KEY[@]}"; do
+    if out[i]=$(list "$i"); then ok[i]=1; else ok[i]=0; fi
+  done
+  w=$(printf '%s\n' "${out[@]}" | awk -F'\t' '{ if (length($1) > w) w = length($1) } END { print w + 0 }')
+  rows=$(
+    for i in "${!KEY[@]}"; do
+      if ((ok[i])); then sessions "$i" "$w" <<<"${out[i]}"
+      else row refresh - "$GREY" "${LABEL[i]}" 'unreachable, tap to retry'; fi
+    done
+    for i in "${!KEY[@]}"; do row new "$i" "$GREY" + "new ${LABEL[i]} shell"; done
+    row refresh - "$GREY" '' '↻ reload'
+  )
+  pick=$("$FZF" --delimiter=$'\t' --with-nth=3 --reverse --tiebreak=index --cycle --info=hidden \
+    --ansi --color="$COLORS" --pointer='▌' --marker=' ' --no-scrollbar \
+    --prompt="$HUB_PROMPT" --header="$HUB_HEADER" <<<"$rows") || continue
+  IFS=$'\t' read -r kind id _ <<<"$pick"
+  case $kind in
+    s) open "${id%%:*}" "${id#*:}" ;;
+    new) open "$id" "$(unique <<<"${out[id]}")" ;;
+  esac
+done

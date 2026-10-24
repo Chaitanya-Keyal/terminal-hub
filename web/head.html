@@ -1,0 +1,26 @@
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,interactive-widget=resizes-content">
+<meta name="theme-color" content="#0b0d10">
+<link rel="manifest" href="/assets/app.webmanifest">
+<link rel="apple-touch-icon" href="/assets/app-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/app-32.png">
+<link rel="preload" href="/assets/FiraCodeNF.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face { font-family: "FiraCode NF"; src: url(/assets/FiraCodeNF.woff2) format("woff2"); font-display: block; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
+#terminal-container { height: calc(100% - var(--keys-h, 0px)) !important; }
+#keys {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 44px; z-index: 10;
+  display: flex; gap: 4px; padding: 4px; box-sizing: border-box;
+  overflow-x: auto; scrollbar-width: none; background: #0b0d10; border-top: 1px solid #22262c;
+  touch-action: pan-x; -webkit-user-select: none; user-select: none;
+}
+#keys::-webkit-scrollbar { display: none; }
+#keys button {
+  flex: 0 0 auto; min-width: 42px; padding: 0 10px; border: 0; border-radius: 6px;
+  background: #1c2027; color: #d6dae0; font: 14px "FiraCode NF", monospace;
+}
+#keys button:active { background: #2d333c; }
+#keys button.on { background: #1f6feb; color: #fff; }
+#keys button.nav { color: #7ee787; }
+#keys .sep { flex: 0 0 1px; background: #2a2f36; margin: 4px 2px; }
+</style>

@@ -1,0 +1,20 @@
+[Unit]
+Description=terminal-hub: ttyd running the tmux session picker
+Wants=terminal-hub-assets.service
+
+[Service]
+# Localhost only. ttyd hands a shell to anyone who can reach it: publish it through something
+# that authenticates, like `tailscale serve`, never directly.
+ExecStart=ttyd --interface 127.0.0.1 --port 7682 --writable \
+  --index %h/.local/share/terminal-hub/index.html --url-arg \
+  --client-option disableLeaveAlert=true \
+  --client-option disableResizeOverlay=true \
+  %h/.local/bin/terminal-hub
+WorkingDirectory=%h
+Environment=TERM=xterm-256color
+# Don't take the tmux server (and every session in it) down with ttyd.
+KillMode=process
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

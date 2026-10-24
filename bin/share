@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# share [name]: move this terminal into a tmux session so it also shows up in the
+# terminal hub on the phone. Detach (Ctrl-b d) to get back to the plain shell; the
+# session keeps running until you `exit` it.
+if [ -n "$TMUX" ]; then
+  echo "already shared as tmux session: $(tmux display-message -p '#S')"
+  exit 0
+fi
+base=${1:-$(basename "$PWD")}
+base=${base//[.:]/_}
+name=$base i=2
+while tmux has-session -t "=$name" 2>/dev/null; do name="$base-$((i++))"; done
+exec tmux new-session -s "$name" -c "$PWD"
