@@ -13,7 +13,7 @@ makes TUI apps like Claude Code usable from a phone. The page installs as an app
 
 - **One list across machines.** Each *place* in the config is tmux somewhere: here, on another machine
   over ssh, or as another user through sudo. Rows get a coloured tag per place, and a place that can't be
-  reached says so.
+  reached says so (or, if its ssh key is locked, offers to unlock it).
 - **Phone key bar.** esc, ⇧tab, arrows, tab, a sticky ctrl, ^C, paste, back to the list, new session,
   font size. Swipes scroll tmux history.
 - **Links.** `/?arg=NAME` opens a session, creating it if needed. `/?arg=KEY:NAME` does the same in
@@ -71,8 +71,10 @@ place bot    bot     '#d2a8ff' ssh myserver sudo -u bot -H   # another user's tm
 place box    sandbox '#79c0ff' via sudo -n -u sandbox bash -c  # another user's tmux here
 ```
 
-The first place is "here". ssh places need key login, because listing runs with `BatchMode`. Session
-names are letters, digits, `-` and `_`.
+The first place is "here". ssh places need key login, because listing runs with `BatchMode`. A key with
+a passphrase works if an ssh-agent holds it (`AddKeysToAgent` in `~/.ssh/config`): while it's locked, the
+place shows "locked, tap to unlock", and tapping it asks for the passphrase once. Session names are
+letters, digits, `-` and `_`.
 
 ## Updating
 
