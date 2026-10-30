@@ -1,0 +1,15 @@
+{
+  "name": "terminal-hub-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests and screenshots for terminal-hub. The hub itself has no build step and needs none of this.",
+  "scripts": {
+    "test": "bash hub-state.test.sh && node e2e.mjs",
+    "typecheck": "tsc -p ../tsconfig.json",
+    "screenshots": "node screenshots.mjs --readme"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install ttyd, tmux and shellcheck
+        run: sudo apt-get update && sudo apt-get install -y ttyd tmux shellcheck
+
+      - name: Shellcheck
+        run: shellcheck bin/terminal-hub bin/share bin/hub-state install.sh tools/vendor.sh tests/hub-state.test.sh
+
+      - name: hub-state
+        run: bash tests/hub-state.test.sh
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install Playwright and TypeScript
+        working-directory: tests
+        run: npm ci && npx playwright install --with-deps chromium
+
+      - name: Type-check the page
+        working-directory: tests
+        run: npm run typecheck
+
+      - name: End-to-end
+        working-directory: tests
+        run: node e2e.mjs
