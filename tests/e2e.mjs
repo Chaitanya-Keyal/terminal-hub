@@ -247,10 +247,11 @@ try {
   mkdirSync(join(extra, 'tmux'), { mode: 0o700 });
   writeFileSync(join(extra, 'slow.sh'), `#!/bin/bash\n[ -e ${extra}/slow ] && sleep 3\n` +
     `exec env -u TMUX -u TMUX_PANE TMUX_TMPDIR=${extra}/tmux HOME=${extra} bash -c "$1"\n`, { mode: 0o755 });
+  // The work rule names an unusual folder: */work/* would match CI's temp folder (/home/runner/work/...).
   const hub2 = await startHub({
     places: [{ key: 'laptop', label: 'laptop', colour: '#7ee787' }, { key: 'server', label: 'server', colour: '#ff7b72' }],
     extraConfig: [`place slow slow '#d2a8ff' via ${extra}/slow.sh`, 'icon laptop laptop', 'icon server 🚀',
-      `category work Work briefcase '*/hub-e2e-work/*'`  // not */work/*: CI's temp folder is under /work/, `category bots Bots bot 'server:bot*'`],
+      `category work Work briefcase '*/hub-e2e-work/*'`, `category bots Bots bot 'server:bot*'`],
   });
   try {
     const workDir = join(hub2.home, 'home-laptop', 'hub-e2e-work', 'api');
