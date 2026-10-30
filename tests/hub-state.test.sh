@@ -54,7 +54,7 @@ check "a 3 MB event" waiting/main
 printf '{"something":"else"}' | bin/hub-state hook
 check "an event it doesn't know changes nothing" waiting/main
 
-# The watch: a permission dialog that closes means you answered it.
+# The watch, for what no hook reports: each prompt and each permission dialog starts one.
 bin/hub-state clear
 sleep 0.6  # the watches started above see the change and stop
 TR=",\"transcript_path\":\"$dir/t.jsonl\""
@@ -63,27 +63,42 @@ dialog() { tmux send-keys -t t "clear; printf ' Do you want to proceed?\n 1. Yes
 answer() { tmux send-keys -t t clear Enter; }
 # wait_for STATE/WAITER: true once the mark is that (up to 4 s)
 wait_for() { local i; for ((i = 0; i < 40; i++)); do [[ "$(opt @hub-state)/$(opt @hub-wait)" == "$1" ]] && return 0; sleep 0.1; done; return 1; }
-# reject HOW: the line Claude Code adds to the transcript when you say no
-reject() { printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"The user doesn'\''t want to proceed with this tool use. %s"}]}}\n' "$1" >>"$dir/t.jsonl"; }
-STOP='STOP what you are doing and wait for the user to tell you how to proceed.'
-reject "$STOP"  # an earlier no, which mustn't count
+# expect WHAT STATE/WAITER: check, allowing the watch its moment
+expect() { if wait_for "$2"; then pass "$1"; else fail "$1: expected $2, got $(opt @hub-state)/$(opt @hub-wait)"; fi; }
+# Lines Claude Code adds to the transcript: stopped [" for tool use"], and no [WHAT-INSTEAD].
+stopped() { printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user%s]"}]}}\n' "${1:-}" >>"$dir/t.jsonl"; }
+no() {
+  printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"The user doesn'\''t want to proceed with this tool use. %s"}]}}\n' \
+    "${1:-STOP what you are doing and wait for the user to tell you how to proceed.}" >>"$dir/t.jsonl"
+  [[ -n ${1:-} ]] || stopped ' for tool use'
+}
+stopped  # from an earlier turn
+ev UserPromptSubmit '' "$TR"
+sleep 1.5;                        check "an earlier turn's interruption doesn't count" working/
+stopped
+expect "pressing Esc: the mark clears" /
+ev UserPromptSubmit '' "$TR"
 dialog
 ev PermissionRequest '' "$TR$T"
 sleep 1.5;                        check "while the dialog is open: waiting" waiting/main
 answer
-if wait_for working/; then pass "answering it: working at once"; else fail "answering it: still $(opt @hub-state)/$(opt @hub-wait)"; fi
+expect "answering it: working at once" working/
 dialog
 ev PermissionRequest '' "$TR$T"
 sleep 1
-reject "$STOP"
+no
 answer
-sleep 2.5;                        check "saying no: Claude waits for you, so still waiting" waiting/main
+expect "saying no: Claude stops, and the mark clears" /
+ev UserPromptSubmit '' "$TR"
 dialog
 ev PermissionRequest '' "$TR$T"
 sleep 1
-reject 'To tell you how to proceed, the user said: use ls'
+no 'To tell you how to proceed, the user said: use ls'
 answer
-if wait_for working/; then pass "saying no and what to do instead: working"; else fail "no with a reason: still $(opt @hub-state)/$(opt @hub-wait)"; fi
+expect "saying no and what to do instead: working" working/
+ev Stop
+stopped
+sleep 1.5;                        check "after the turn, nothing is watched" done/
 
 if env -u TMUX -u TMUX_PANE bin/hub-state hook <<<'{}'; then pass "outside tmux: does nothing"; else fail "outside tmux: failed"; fi
 bin/hub-state bogus 2>/dev/null

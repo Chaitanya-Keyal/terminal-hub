@@ -29,35 +29,56 @@ mark() {
 
 clear_mark() {
   tmux set-option -qu -t "$pane" @hub-state \; set-option -qu -t "$pane" @hub-state-at \; \
-    set-option -qu -t "$pane" @hub-wait 2>/dev/null
+    set-option -qu -t "$pane" @hub-wait \; set-option -qu -t "$pane" @hub-watch 2>/dev/null
 }
 
-# watch AGENT TRANSCRIPT: no hook fires when you answer a permission dialog (the next one comes
-# when the tool finishes, which can take minutes), so this watches the pane instead, in the
-# background: once the dialog's last line ("Esc to cancel ...") is gone, it's working again.
-# Unless you said no (or pressed Esc): then Claude Code adds "STOP ... wait for the user" to the
-# transcript and waits for you. (Questions don't need this: answering one finishes its tool.)
-# It stops when anything else changes the mark, and when no dialog shows up within 5 s.
+# watch ID TRANSCRIPT: what Claude Code has no hook for, watched in the background from each
+# prompt and each permission dialog until the turn ends (or a newer watch, in @hub-watch, takes
+# over):
+# - You stop it (Esc, or no to a permission): it logs "[Request interrupted by user" and waits.
+#   The mark clears, as with OpenCode: you're there anyway.
+# - You answer a permission dialog: its last line ("Esc to cancel ...") goes, and it works on.
+#   (The next hook comes only when the tool finishes, which can take minutes.)
 watch() {
-  local seen=0 i size
-  size=$(wc -c <"$2" 2>/dev/null)  # only what's written after this counts
-  for ((i = 0; i < 7200; i++)); do
+  local id=$1 file=$2 start off seen=0 i state owner
+  start=$(wc -c <"$file" 2>/dev/null) || start=0
+  off=$start
+  for ((i = 0; i < 86400; i++)); do  # 12 hours at most
     sleep 0.5
-    [ "$(tmux display-message -p -t "$pane" '#{@hub-state}|#{@hub-wait}' 2>/dev/null)" = "waiting|$1" ] || return
-    if tmux capture-pane -p -t "$pane" 2>/dev/null | grep -q '^ *Esc to cancel'; then
+    IFS='|' read -r state owner < <(tmux display-message -p -t "$pane" '#{@hub-state}|#{@hub-watch}' 2>/dev/null)
+    [[ $owner == "$id" && ($state == working || $state == waiting) ]] || return
+    if interrupted; then clear_mark; return; fi
+    if [[ $state != waiting ]]; then
+      seen=0
+    elif tmux capture-pane -p -t "$pane" 2>/dev/null | grep -q '^ *Esc to cancel'; then
       seen=1
     elif ((seen)); then
-      for _ in 1 2; do  # give the transcript a moment to catch up
-        sleep 0.4
-        tail -c +$((size + 1)) "$2" 2>/dev/null | grep -q 'STOP what you are doing and wait for the user' && return
-      done
-      cur=waiting waiter=$1
+      sleep 0.8  # a no shows up in the transcript a moment later
+      if interrupted; then clear_mark; return; fi
+      seen=0 cur=waiting
       mark working
-      return
-    elif ((i >= 10)); then
-      return
     fi
   done
+}
+
+# interrupted: whether the transcript gained an interruption since the last look. Each look
+# starts a little before the last one ended, for a line that was half written then.
+interrupted() {
+  local size from
+  size=$(wc -c <"$file" 2>/dev/null) || return 1
+  ((size > off)) || return 1
+  from=$((off - 40 > start ? off - 40 : start))
+  off=$size
+  tail -c +$((from + 1)) "$file" | head -c $((size - from)) | grep -q '"text":"\[Request interrupted by user'
+}
+
+# watch_from_here: start a watch for this turn, on its own (output closed, so Claude Code doesn't
+# wait for it), replacing any earlier one.
+watch_from_here() {
+  local id=$$.$RANDOM
+  tmux set-option -q -t "$pane" @hub-watch "$id" 2>/dev/null
+  if command -v setsid >/dev/null; then setsid -f "$0" watch "$id" "$transcript" </dev/null >/dev/null 2>&1
+  else "$0" watch "$id" "$transcript" </dev/null >/dev/null 2>&1 & fi
 }
 
 # Claude Code's events. Its JSON gives the event name and the agent id (set inside subagents)
@@ -72,17 +93,13 @@ hook() {
   [[ $json =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && agent=${BASH_REMATCH[1]}
   [[ $json =~ \"transcript_path\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] && transcript=${BASH_REMATCH[1]}
   case $event in
-    UserPromptSubmit) mark working ;;
-    # A permission dialog or a question is open (in auto mode: only when it does ask you). The
-    # watch runs on its own (its output closed, so Claude Code doesn't wait for it).
-    PermissionRequest)
-      mark waiting "$agent"
-      if command -v setsid >/dev/null; then setsid -f "$0" watch "$agent" "$transcript" </dev/null >/dev/null 2>&1
-      else "$0" watch "$agent" "$transcript" </dev/null >/dev/null 2>&1 & fi ;;
+    UserPromptSubmit) mark working; watch_from_here ;;
+    # A permission dialog or a question is open (in auto mode: only when it does ask you).
+    PermissionRequest) mark waiting "$agent"; watch_from_here ;;
     # A tool finished: back to work, unless another agent (a subagent, say) is waiting on you.
     PostToolUse | PostToolUseFailure)
       if [ "$cur" != waiting ] || [ -z "$waiter" ] || [ "$waiter" = "$agent" ]; then mark working; fi ;;
-    # The turn is over, or ended on an error. (Nothing fires when you interrupt it with Esc.)
+    # The turn is over, or ended on an error. (Nothing fires when you stop it: see watch.)
     Stop | StopFailure) mark "done" ;;
     SessionEnd) clear_mark ;;
   esac
@@ -92,7 +109,7 @@ case ${1:-} in
   working | waiting | done) mark "$1" ;;
   clear) clear_mark ;;
   hook) hook ;;
-  watch) watch "${2:-main}" "${3:-}" ;;  # started by hook
+  watch) watch "${2:-}" "${3:-}" ;;  # started by hook
   *) echo "usage: hub-state working|waiting|done|clear, or hub-state hook (see integrations/)" >&2; exit 2 ;;
 esac
 exit 0
