@@ -112,6 +112,18 @@ export class TermView {
     t.onBinary(d => this.sendBytes(Uint8Array.from(d, c => c.charCodeAt(0))));
     t.onResize(({ cols, rows }) => this.sendCommand('1', JSON.stringify({ columns: cols, rows })));
     t.parser.registerOscHandler(7766, data => { this.reason = data; return true; });
+    // tmux's copy (a mouse drag, with mouse mode on) arrives as OSC 52 "SELECTION;BASE64": put it
+    // on the clipboard. A request to read the clipboard ("?") is ignored: it's none of their business.
+    t.parser.registerOscHandler(52, data => {
+      const b64 = data.slice(data.indexOf(';') + 1);
+      if (b64 && b64 !== '?' && navigator.clipboard) {
+        try {
+          const text = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+          navigator.clipboard.writeText(text).then(() => this.hooks.copied(), () => {});
+        } catch { /* not base64 */ }
+      }
+      return true;
+    });
     t.onSelectionChange(() => {
       const s = t.getSelection();
       if (s && navigator.clipboard) navigator.clipboard.writeText(s).then(() => this.hooks.copied(), () => {});

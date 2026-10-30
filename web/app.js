@@ -621,13 +621,14 @@ function notifyChanges() {
   }
 }
 
+// One notification per session (its tag), which alerts again each time (renotify). T '': a sample.
 async function show(t, title, body) {
-  const options = { body, tag: t, icon: '/assets/app-192.png', data: { target: t, url: `/?arg=${t}` } };
+  const options = { body, tag: t || 'hub', renotify: true, icon: '/assets/app-192.png', data: { target: t, url: t ? `/?arg=${t}` : '/' } };
   try {
     const reg = await navigator.serviceWorker?.getRegistration();  // phones show them only this way
     if (reg?.active) return await reg.showNotification(title, options);
     const n = new Notification(title, options);
-    n.onclick = () => { window.focus(); openFromNotification(t); n.close(); };
+    n.onclick = () => { window.focus(); if (t) openFromNotification(t); n.close(); };
   } catch { /* not allowed after all */ }
 }
 
@@ -645,6 +646,8 @@ async function setNotify(on) {
   store.set('notify', on);
   paintBell();
   toast(on ? 'Notifications on' : 'Notifications off');
+  // A sample, so you see at once whether they reach you (the system may hide them: do not disturb).
+  if (on) show('', 'Notifications are on', 'You get one like this when a session needs you or finishes.');
   if (document.hidden && !on) quiet();
 }
 

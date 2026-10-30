@@ -68,6 +68,10 @@ try {
     Object.defineProperty(Fake, 'permission', { get: () => 'granted' });
     Fake.requestPermission = () => Promise.resolve('granted');
     window.Notification = /** @type {any} */ (Fake);
+    // The clipboard too: what the page copies is kept.
+    const copied = /** @type {any} */ (window).__copied = [];
+    Object.defineProperty(navigator, 'clipboard', { value: {
+      writeText: t => { copied.push(t); return Promise.resolve(); }, readText: () => Promise.resolve('') } });
   });
   const notes = () => page.evaluate(() => /** @type {any} */ (window).__notes.map(n => `${n.title} · ${n.body}`));
   const page = await ctx.newPage();
@@ -85,6 +89,11 @@ try {
   await until(() => page.locator('.xterm-rows').evaluate(el => el.textContent.includes('$')), 4000);
   await page.keyboard.type('echo hub-$((40+2))\n');
   check('typing reaches the session', await until(() => tmux('laptop', 'capture-pane', '-p', '-t', 'alpha').includes('hub-42')));
+  // A mouse drag in tmux copies like this: tmux sends the text to the terminal (OSC 52).
+  const alphaClient = tmux('laptop', 'list-clients', '-t', 'alpha', '-F', '#{client_name}').split('\n')[0];
+  tmux('laptop', 'set-buffer', '-w', '-t', alphaClient, 'copied-é ✓');
+  check("tmux's copy reaches the clipboard", await until(async () => (await page.evaluate(() => /** @type {any} */ (window).__copied)).includes('copied-é ✓')),
+    JSON.stringify(await page.evaluate(() => /** @type {any} */ (window).__copied)));
 
   await row(page, 'gamma').locator('.row-main').click();
   check('switch to another place', await until(() => clients('server').includes('gamma')), clients('server').join());
@@ -182,6 +191,7 @@ try {
   const bell = page.locator('.side-foot button[aria-pressed]');
   await bell.click();
   check('the bell turns notifications on', await until(async () => (await bell.getAttribute('aria-pressed')) === 'true'));
+  check('... and shows a sample, so you see they arrive', await until(async () => (await notes()).some(n => n.startsWith('Notifications are on'))), (await notes()).join(' | '));
   tmux('laptop', 'set-option', '-t', 'beta', '@hub-state', 'waiting');
   // No polling here: the event stream brings the change (the page's safety poll is every 30 s).
   check('a session that needs you gets a dot, pushed to the page', await until(() => row(page, 'beta').locator('.st-waiting').isVisible(), 6000));
