@@ -92,6 +92,8 @@ kbd .icon { width: 12px; height: 12px; }
 .group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-count { color: var(--faint); font-weight: 500; letter-spacing: 0; }
 .group-head .icon-btn.add { opacity: .7; }
+.group-head .group-more { opacity: 0; }
+.group-head:hover .group-more, .group-more:focus-visible, .narrow .group-head .group-more { opacity: 1; }
 .group-head:hover .icon-btn.add, .group-head .icon-btn.add:focus-visible { opacity: 1; }
 /* Marks: a place's icon in its colour (or a dot), a category's icon, an emoji in place of either. */
 .pmark, .cat-mark { display: inline-grid; place-items: center; width: 15px; height: 15px; flex: none; color: var(--c, var(--muted)); }
@@ -349,7 +351,19 @@ kbd .icon { width: 12px; height: 12px; }
 .menu-item > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-item.current > .icon:last-child { color: var(--accent); }
 .menu-item.danger:hover { background: rgba(255, 123, 114, .12); }
-.menu-form { padding: 4px; }
+.menu-form { display: grid; gap: 8px; padding: 4px; }
+.menu-form .menu-actions { padding: 2px 0 0; }
+/* The icon picker: a scrolling grid of the place and category icons. */
+.icon-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(28px, 1fr)); gap: 2px;
+  max-height: 128px; overflow-y: auto; padding: 2px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent;
+}
+.icon-pick { display: grid; place-items: center; height: 28px; border-radius: var(--radius); color: var(--muted); }
+.icon-pick:hover { background: var(--raise-2); color: var(--text); }
+.icon-pick.on { background: var(--raise-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--focus); }
+.menu-check { display: flex; align-items: flex-start; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.4; }
+.menu-check input { margin: 2px 0 0; accent-color: var(--accent); }
+.menu-check b { color: var(--text); font-weight: 500; word-break: break-all; }
 .menu-text { margin: 6px 6px 10px; color: var(--text-2); font-size: 13px; line-height: 1.45; }
 .menu-text b { color: var(--text); }
 .menu-actions { display: flex; justify-content: flex-end; gap: 6px; padding: 0 4px 4px; }
@@ -362,6 +376,10 @@ kbd .icon { width: 12px; height: 12px; }
 .menu-sheet .menu-text { font-size: 15px; }
 .menu-sheet .btn { height: 44px; padding: 0 18px; border-radius: 10px; font-size: 15px; }
 .menu-sheet .create-input { height: 44px; font-size: 16px; border-radius: 10px; }
+.menu-sheet .icon-grid { grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); max-height: 200px; gap: 4px; }
+.menu-sheet .icon-pick { height: 42px; border-radius: 10px; }
+.menu-sheet .icon-pick .icon { width: 20px; height: 20px; }
+.menu-sheet .menu-check { font-size: 14px; }
 .modal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(0, 0, 0, .55); }
 .modal-box {
   display: flex; flex-direction: column; width: min(720px, 94vw); height: min(420px, 72vh); overflow: hidden;

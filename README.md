@@ -124,6 +124,12 @@ category work  Work  briefcase '*/work/*'   # sessions started in a work folder
 category ops   Ops   rocket    'srv:*' 'deploy*'
 ```
 
+You can also make categories on the page: a session's ⋯, **Move to category**, **New
+category…**, with a name, an icon, and (ticked unless it's your home folder) a rule that catches
+sessions started in that session's folder, so the next `cc` there lands in it too. Those live in
+`~/.config/terminal-hub/categories` (one per line, tab-separated; not run as code), and their own ⋯
+renames or deletes them. Categories in the config are changed in the config.
+
 A session goes into the first category with a matching pattern: one with a `/` matches the
 folder the session started in, one with a `:` matches `PLACE:NAME`, and any other matches the
 session's name (`*` and `?` work as in the shell). The ⋯ menu's **Move to category** overrides

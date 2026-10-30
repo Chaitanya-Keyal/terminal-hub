@@ -7,7 +7,7 @@
 // Needs ttyd, tmux and python3. PLAYWRIGHT (a path to playwright's index.mjs) and CHROMIUM (a
 // browser executable) override the defaults.
 import http from 'node:http';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startHub, launch, until, sleep } from './harness.mjs';
@@ -319,6 +319,34 @@ try {
     check('... and "No category" takes one out, even one a rule put in', await until(async () =>
       (await order()) === 'Work,laptop,server,slow' && (await group('server').locator('.row-name').allTextContents()).join() === 'bot1,logs')
       && hub2.tmux('server', 'show-options', '-v', '-t', '=bot1:', '@hub-category') === '-', await order());
+
+    // Categories made on the page: from a session's menu, then edited from the category's own.
+    check("a category from the config has no ⋯ (it's changed there)", !(await group('Work').locator('.group-more').count()));
+    await menuFor('logs');
+    await pg.locator('.menu .menu-item', { hasText: 'New category' }).click();
+    await pg.locator('.menu .create-input').fill('Website');
+    await pg.locator('.menu .icon-pick[title="globe"]').click();
+    await pg.locator('.menu .btn.primary', { hasText: 'Create' }).click();
+    check('a category can be made on the page, with the session in it', await until(async () =>
+      (await order()) === 'Work,Website,laptop,server,slow' && (await group('Website').locator('.row-name').allTextContents()).join() === 'logs'), await order());
+    check('... kept beside the config, with an icon and a rule for its folder',
+      /^website\tWebsite\tglobe\t(\/[^\t]+)\t\1\/\*\n$/.test(readFileSync(join(hub2.home, '.config/terminal-hub/categories'), 'utf8'))
+        && await group('Website').locator('.group-head .cat-mark svg').count() === 1,
+      JSON.stringify(readFileSync(join(hub2.home, '.config/terminal-hub/categories'), 'utf8')));
+    const categoryMenuOf = async name => {
+      await group(name).locator('.group-head').hover();
+      await group(name).locator('.group-more').click();
+    };
+    await categoryMenuOf('Website');
+    await pg.locator('.menu .menu-item', { hasText: 'Rename' }).click();
+    await pg.locator('.menu .create-input').fill('Site');
+    await pg.locator('.menu .btn.primary', { hasText: 'Save' }).click();
+    check("... renamed from its own ⋯", await until(async () => (await order()) === 'Work,Site,laptop,server,slow'), await order());
+    await categoryMenuOf('Site');
+    await pg.locator('.menu .menu-item', { hasText: 'Delete category' }).click();
+    await pg.locator('.menu .btn.danger').click();
+    check('... and deleted, its sessions back in their places', await until(async () =>
+      (await order()) === 'Work,laptop,server,slow' && (await group('server').locator('.row-name').allTextContents()).join() === 'bot1,logs'), await order());
 
     writeFileSync(join(extra, 'slow'), '');  // the slow place now takes 3 s to answer
     await sleep(2500);                       // so every list is stale

@@ -105,3 +105,5 @@ export function icon(name, label) {
 }
 
 export const hasIcon = name => Object.hasOwn(PATHS, name);
+// The icons for places and categories, for the page's icon picker.
+export const PLACE_ICONS = ["bitcoin", "book-open", "bot", "brain", "briefcase", "bug", "building-2", "box", "chart-line", "cloud", "code", "coffee", "container", "cpu", "database", "flame", "flask-conical", "folder", "folder-git-2", "gamepad-2", "gem", "git-branch", "globe", "graduation-cap", "hammer", "hard-drive", "heart", "house", "key-round", "laptop", "layers", "leaf", "mail", "monitor", "moon", "mountain", "music", "package", "palette", "puzzle", "rocket", "router", "server", "shield", "smartphone", "sparkles", "star", "sun", "target", "terminal", "user", "users", "wallet", "wrench", "zap"];

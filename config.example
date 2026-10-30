@@ -28,7 +28,9 @@ place here "$(hostname)" '#7ee787' local
 #   a pattern with a / matches the folder the session started in    '*/work/*'
 #   one with a : matches PLACE:NAME                                  'server:deploy*'
 #   any other matches the session's name                             'notes'
-# Patterns are globs (* and ?). Categories with no sessions don't show.
+# Patterns are globs (* and ?). Categories with no sessions don't show. Categories can also be
+# made on the page (a session's ⋯, Move to category, New category); those go in the file
+# ./categories next to this one.
 #   category KEY LABEL ICON [PATTERN...]
 # category work Work briefcase '*/work/*'
 # category ops  Ops  rocket    'server:*'

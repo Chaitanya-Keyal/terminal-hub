@@ -28,7 +28,8 @@ EVENT_SECONDS = 2   # how often an event stream looks for a change
 CONFIG = os.environ.get("TERMINAL_HUB_CONFIG") or os.path.expanduser("~/.config/terminal-hub/config")
 
 state = threading.Condition()
-config = {"stamp": None, "categories": [], "places": []}  # stamp: the config file's mtime
+CATEGORIES = os.path.join(os.path.dirname(CONFIG), "categories")  # the ones made on the page
+config = {"stamp": None, "categories": [], "places": []}  # stamp: when the two files last changed
 # Per place key: busy (a list is running), started (when it started), listed (when the last
 # finished list started; 0: never), again (list once more when this one ends), state, sessions.
 lists = {}
@@ -59,7 +60,8 @@ def parse(out):
     for line in out.splitlines():
         f = line.split("\t")
         if f[0] == "category" and len(f) >= 4:
-            categories.append({"key": f[1], "label": f[2], "icon": f[3]})
+            categories.append({"key": f[1], "label": f[2], "icon": f[3],
+                               "editable": len(f) > 4 and f[4] == "page"})  # made on the page
         elif f[0] == "place" and len(f) >= 5:
             places.append({"key": f[1], "label": f[2], "colour": f[3], "state": f[4],
                            "icon": f[5] if len(f) > 5 else "", "sessions": []})
@@ -69,6 +71,7 @@ def parse(out):
                 "status": f[5] if f[5] in ("working", "waiting", "done") else "", "statusAt": _int(f[6]),
                 "prefix": f[7][:16] if len(f) > 7 else "",   # the session's tmux prefix, e.g. C-b
                 "category": f[8] if len(f) > 8 else "",
+                "path": f[9] if len(f) > 9 else "",  # the folder it started in
             })
     return categories, places
 
@@ -104,10 +107,7 @@ def snapshot(fresh=None):
     """The list, as JSON. fresh: None, True (every place) or a set of place keys."""
     now = time.monotonic()
     with state:
-        try:
-            stamp = os.stat(CONFIG).st_mtime_ns
-        except OSError:
-            stamp = 0  # no config: terminal-hub lists this machine alone
+        stamp = tuple(os.stat(f).st_mtime_ns if os.path.exists(f) else 0 for f in (CONFIG, CATEGORIES))
         if stamp != config["stamp"]:  # read the config (categories, places) when it changes
             categories, places = parse(run("--config", timeout=10))
             config["stamp"] = stamp

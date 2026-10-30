@@ -12,6 +12,9 @@
 #   terminal-hub --rename KEY:NAME NEW   rename a session (the page's session menu runs this)
 #   terminal-hub --kill KEY:NAME         end a session and everything running in it
 #   terminal-hub --category KEY:NAME CAT put a session in category CAT (- for none)
+#   terminal-hub --new-category LABEL ICON [PATTERN...]   make a category (the page does this)
+#   terminal-hub --edit-category KEY LABEL ICON           rename one made that way
+#   terminal-hub --delete-category KEY                    and remove it
 #   terminal-hub --check       check the setup: tools, config, every place, services
 #   terminal-hub               pick a session with fzf and attach (in an ordinary terminal)
 #
@@ -35,15 +38,32 @@ place() {  # place KEY LABEL COLOUR local|ssh|via [ARGS...]
 }
 declare -A ICON=()
 icon() { ICON[$1]=${2:-}; }  # icon KEY NAME: place KEY's icon (a Lucide name, or an emoji)
-CAT_KEY=() CAT_LABEL=() CAT_ICON=() CAT_PATS=()
+CAT_KEY=() CAT_LABEL=() CAT_ICON=() CAT_PATS=() CAT_PAGE=()
 category() {  # category KEY LABEL ICON [PATTERN...]
   [[ $1 =~ ^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$ ]] || die "category key '$1' in $CONFIG: use letters, digits, - and _"
   local IFS=$'\n'
-  CAT_KEY+=("$1") CAT_LABEL+=("${2:-$1}") CAT_ICON+=("${3:-}") CAT_PATS+=("${*:4}")
+  CAT_KEY+=("$1") CAT_LABEL+=("${2:-$1}") CAT_ICON+=("${3:-}") CAT_PATS+=("${*:4}") CAT_PAGE+=(0)
 }
 # shellcheck source=/dev/null
 [[ -f $CONFIG ]] && source "$CONFIG"
 ((${#KEY[@]})) || place here "$(hostname)" '#7ee787' local
+
+# Categories made on the page live in a data file next to the config (never run as code), one
+# per line: KEY, LABEL, ICON ("-" for none), then patterns, tab-separated. The config's come first.
+CATS=${CONFIG%/*}/categories
+category_index() {  # category_index KEY: the category's index, or fail
+  local c
+  for c in "${!CAT_KEY[@]}"; do [[ ${CAT_KEY[c]} == "$1" ]] && echo "$c" && return 0; done
+  return 1
+}
+if [[ -f $CATS ]]; then
+  while IFS=$'\t' read -r -a f; do
+    if [[ ! ${f[0]:-} =~ ^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$ ]] || category_index "${f[0]}" >/dev/null; then continue; fi
+    [[ ${f[2]:--} == - ]] && f[2]=''
+    category "${f[@]:0:3}" "${f[@]:3}"
+    CAT_PAGE[-1]=1
+  done <"$CATS"
+fi
 
 # Listing reuses one ssh connection per place for a minute, so the page can refresh often.
 LIST_SSH=(-o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o "ControlPath=$RUN/ssh-%C"
@@ -110,7 +130,8 @@ cmd_list() {
   local i c st name win att prefix path cat state at CAT want=("$@")
   ((${#want[@]})) || want=("${!KEY[@]}")
   for c in "${!CAT_KEY[@]}"; do
-    printf 'category\t%s\t%s\t%s\n' "${CAT_KEY[c]}" "${CAT_LABEL[c]}" "${CAT_ICON[c]}"
+    printf 'category\t%s\t%s\t%s\t%s\n' "${CAT_KEY[c]}" "${CAT_LABEL[c]}" "${CAT_ICON[c]}" \
+      "$( ((CAT_PAGE[c])) && echo page || echo config)"
   done
   ((LIST)) && list_all "${want[@]}"
   for i in "${want[@]}"; do
@@ -121,8 +142,8 @@ cmd_list() {
     while IFS=$'\t' read -r name win att prefix path cat state at; do
       [[ -n $name ]] || continue
       category_of "$i" "$name" "$path" "${cat#=}"
-      printf 'session\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "$name" "$win" "$att" "${state#=}" "${at#=}" \
-        "$prefix" "$CAT"
+      printf 'session\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "$name" "$win" "$att" "${state#=}" "${at#=}" \
+        "$prefix" "$CAT" "$path"
     done <"$TMPD/$i"
   done
   ((LIST)) && rm -rf "$TMPD"
@@ -213,7 +234,7 @@ q() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 
 # answer STATUS OUTPUT: tell the page how it went (OSC 7766 "ok" or "failed;MESSAGE").
 answer() {
-  if (($1 == 0)); then printf '\e]7766;ok\a'
+  if (($1 == 0)); then printf '\e]7766;ok%s\a' "${2:+;$2}"
   else printf '\e]7766;failed;%s\a' "$(printf '%s' "${2:-failed}" | tr -d '\000-\037' | head -c 200)"; fi
   sleep 0.5  # as in attach_cmd: let ttyd send it before the exit
   exit 0
@@ -225,8 +246,8 @@ cmd_rename() {
   target "${1:-}" || answer 1 "no place called ${1%%:*}"
   [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
   [[ ${2:-} =~ $NAME_RE ]] || answer 1 "the new name: $NAME_RULE"
-  out=$(in_place "$I" "tmux rename-session -t $(q "=$NAME") $2" 2>&1)
-  answer $? "$out"
+  out=$(in_place "$I" "tmux rename-session -t $(q "=$NAME") $2" 2>&1) || answer 1 "$out"
+  answer 0
 }
 
 cmd_category() {
@@ -236,16 +257,82 @@ cmd_category() {
   [[ ${2:-} == - ]] && ok=1
   for c in "${CAT_KEY[@]}"; do [[ $c == "${2:-}" ]] && ok=1; done
   ((ok)) || answer 1 "no category called '${2:-}'"
-  out=$(in_place "$I" "tmux set-option -t $(q "=$NAME:") @hub-category $2" 2>&1)
-  answer $? "$out"
+  out=$(in_place "$I" "tmux set-option -t $(q "=$NAME:") @hub-category $2" 2>&1) || answer 1 "$out"
+  answer 0
+}
+
+# Page-made categories (the CATS file). Writes take a lock on the config's folder, and replace the
+# file in one step.
+cats_lock() { exec 9<"${CATS%/*}" && { command -v flock >/dev/null || return 0; flock 9; }; }
+# cats_put KEY [LINE]: KEY's line becomes LINE (or goes, without one); a new KEY's is added.
+cats_put() {
+  local tmp line found=0
+  tmp=$(mktemp "$CATS.XXXXXX") || return 1
+  if [[ -f $CATS ]]; then
+    while IFS= read -r line || [[ -n $line ]]; do
+      if [[ ${line%%$'\t'*} == "$1" ]]; then
+        ((found)) || [[ -z ${2:-} ]] || printf '%s\n' "$2"
+        found=1
+      else
+        printf '%s\n' "$line"
+      fi
+    done <"$CATS" >"$tmp"
+  fi
+  ((found)) || [[ -z ${2:-} ]] || printf '%s\n' "$2" >>"$tmp"
+  mv "$tmp" "$CATS"
+}
+valid_label() { [[ -n $1 && ${#1} -le 40 && $1 != *[[:cntrl:]]* ]]; }
+# A Lucide name, or something short like an emoji.
+valid_icon() { [[ $1 =~ ^[A-Za-z0-9-]{1,32}$ ]] || [[ -n $1 && ${#1} -le 16 && $1 != *[[:cntrl:]]* && $1 != *' '* ]]; }
+
+cmd_new_category() {
+  local label=${1:-} icon=${2:-} base key i=2 p line
+  valid_label "$label" || answer 1 "a name of 1-40 characters"
+  valid_icon "$icon" || answer 1 "an icon name or an emoji"
+  for p in "${@:3}"; do [[ -n $p && $p != *[[:cntrl:]]* ]] || answer 1 "a pattern with a control character"; done
+  base=${label,,} base=${base//[^a-z0-9]/-}
+  while [[ $base == *--* ]]; do base=${base//--/-}; done
+  base=${base#-} base=${base%-} base=${base:0:24}
+  [[ -n $base ]] || base=category
+  cats_lock || answer 1 "can't lock ${CATS%/*}"
+  key=$base
+  while category_index "$key" >/dev/null || grep -q "^$key"$'\t' "$CATS" 2>/dev/null; do key=$base-$((i++)); done
+  line=$key$'\t'$label$'\t'$icon
+  for p in "${@:3}"; do line+=$'\t'$p; done
+  cats_put "$key" "$line" || answer 1 "can't write $CATS"
+  answer 0 "$key"
+}
+
+# page_category KEY: sets C to the index of KEY, a category made on the page, or answers why not.
+page_category() {
+  C=$(category_index "$1") || answer 1 "no category called '$1'"
+  ((CAT_PAGE[C])) || answer 1 "'$1' is in the config file: change it there"
+}
+
+cmd_edit_category() {
+  local C line p
+  page_category "${1:-}"
+  valid_label "${2:-}" || answer 1 "a name of 1-40 characters"
+  valid_icon "${3:-}" || answer 1 "an icon name or an emoji"
+  line=$1$'\t'$2$'\t'$3
+  while IFS= read -r p; do [[ -n $p ]] && line+=$'\t'$p; done <<<"${CAT_PATS[C]}"
+  if ! cats_lock || ! cats_put "$1" "$line"; then answer 1 "can't write $CATS"; fi
+  answer 0
+}
+
+cmd_delete_category() {
+  local C
+  page_category "${1:-}"
+  if ! cats_lock || ! cats_put "$1"; then answer 1 "can't write $CATS"; fi
+  answer 0
 }
 
 cmd_kill() {
   local out
   target "${1:-}" || answer 1 "no place called ${1%%:*}"
   [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
-  out=$(in_place "$I" "tmux kill-session -t $(q "=$NAME")" 2>&1)
-  answer $? "$out"
+  out=$(in_place "$I" "tmux kill-session -t $(q "=$NAME")" 2>&1) || answer 1 "$out"
+  answer 0
 }
 
 cmd_unlock() {
@@ -326,12 +413,15 @@ case ${1:-} in
   --list) indexes "${@:2}" && cmd_list "${IDX[@]}" ;;
   --config) LIST=0 cmd_list ;;
   --category) cmd_category "${2:-}" "${3:-}" ;;
+  --new-category) cmd_new_category "${@:2}" ;;
+  --edit-category) cmd_edit_category "${2:-}" "${3:-}" "${4:-}" ;;
+  --delete-category) cmd_delete_category "${2:-}" ;;
   --existing) go "${2:-}" existing ;;
   --unlock) cmd_unlock "${2:-}" ;;
   --rename) cmd_rename "${2:-}" "${3:-}" ;;
   --kill) cmd_kill "${2:-}" ;;
   --check) cmd_check ;;
-  -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
   '') cmd_pick ;;
   -*) die "unknown option $1 (see terminal-hub --help)" ;;
   *) go "$1" ;;

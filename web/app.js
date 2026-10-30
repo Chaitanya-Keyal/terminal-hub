@@ -2,7 +2,7 @@
 // by side. Phones: a home screen with the list, then one terminal with a top bar and key bar.
 // Every terminal is its own connection to ttyd (term.js); the last few hidden ones stay
 // connected, so switching back is instant. The list comes from /assets/sessions.json.
-import { icon, hasIcon } from './icons.js';
+import { icon, hasIcon, PLACE_ICONS } from './icons.js';
 import { TermView, MAC, runHub } from './term.js';
 import { keyBar } from './keys.js';
 
@@ -15,9 +15,9 @@ const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/;  // as terminal-hub's: no l
 const APP = document.title;
 const STATUS = { working: 'Working', waiting: 'Needs you', done: 'Done' };
 
-/** @typedef {{name: string, windows: number, attached: number, status: '' | 'working' | 'waiting' | 'done', statusAt: number, prefix?: string, category?: string, starting?: boolean}} Session */
+/** @typedef {{name: string, windows: number, attached: number, status: '' | 'working' | 'waiting' | 'done', statusAt: number, prefix?: string, category?: string, path?: string, starting?: boolean}} Session */
 /** @typedef {{key: string, label: string, colour: string, icon?: string, state: 'ok' | 'locked' | 'unreachable' | 'pending', sessions: Session[]}} Place */
-/** @typedef {{key: string, label: string, icon?: string}} Category */
+/** @typedef {{key: string, label: string, icon?: string, editable?: boolean}} Category */
 /** @typedef {{p: Place, s: Session}} Item */
 /** @typedef {{id: string, key: string, label: string, category: Category | null, place: Place | null, items: Item[]}} Group */
 
@@ -182,8 +182,17 @@ function placeItems() {
     const shut = !q && S.collapsed.has(g.id);
     const p = g.place;
     if (!p) {
-      out.push(h('section', { class: 'group category' },
-        groupHead(g, items, mark(g.category?.icon) ?? h('span', { class: 'cat-mark' }, icon('tag')), null),
+      const c = /** @type {Category} */ (g.category);
+      out.push(h('section', {
+        class: 'group category',
+        oncontextmenu: e => {  // on the header; a row has its own menu
+          if (!wide() || !c.editable || !/** @type {Element} */ (e.target).closest('.group-head')) return;
+          e.preventDefault();
+          categoryMenu(c, { x: e.clientX, y: e.clientY });
+        },
+      },
+        groupHead(g, items, h('span', { class: 'cat-mark' }, mark(c.icon) ?? icon('tag')),
+          c.editable ? iconBtn('ellipsis', `More for ${c.label}`, e => categoryMenu(c, e.currentTarget), 'group-more') : null),
         !shut && items.map(({ p, s }) => sessionRow(p, s, true))));
       continue;
     }
@@ -777,100 +786,28 @@ function openSettings() {
   document.body.append(wrap);
 }
 
-// ---- a session's menu: rename it, or kill it ---------------------------------------------------
+// ---- menus: a session's (rename, move, kill) and a page-made category's (edit, delete) ---------
 // A popover by the ⋯ button (or the pointer, for a right-click) on a desktop; a sheet on a phone.
-/** @param {string} t @param {Element | {x: number, y: number}} at */
-function sessionMenu(t, at) {
+/** @typedef {{fill: (...kids: any[]) => void, item: (ic: string | Element, label: string, onclick: () => void, cls?: string) => HTMLElement, error: () => HTMLElement, focus: () => void}} MenuKit */
+/** @param {Element | {x: number, y: number}} at @param {string} label @param {(kit: MenuKit) => void} build */
+function openMenu(at, label, build) {
   if (menu && menuAnchor === at) return closeMenu();  // its button again: a toggle
   closeMenu();
   closeHelp();
   menuAnchor = at;
   const body = h('div', { class: 'menu-body' });
-  const fill = (...kids) => body.replaceChildren(...kids.filter(Boolean));  // replaceChildren would print false
-  const title = !wide() && h('div', { class: 'menu-title', style: `--c:${colourOf(t)}` },
-    h('span', { class: 'dot' }), h('b', {}, nameOf(t)), h('small', {}, labelOf(t)));
-  const item = (name, label, onclick, cls = '') =>
-    h('button', { type: 'button', class: `menu-item ${cls}`, role: 'menuitem', onclick }, icon(name), h('span', {}, label));
-  const error = () => h('div', { class: 'create-error', role: 'alert' });
-
-  const choose = () => fill(title,
-    wide() && openable(t) && !visible().includes(t) && item('columns-2', 'Open in a new pane', () => { closeMenu(); openBeside(t); }),
-    item('pencil', 'Rename', rename),
-    S.categories.length > 0 && item('tag', 'Move to category', pickCategory),
-    item('trash-2', 'Kill session', confirmKill, 'danger'));
-
-  const pickCategory = () => {
-    const err = error();
-    const now = sessionOf(t)?.category ?? '';
-    const move = async key => {
-      const r = await runHub(['--category', t, key || '-']);
-      if (!r.ok) { err.textContent = r.message || "Couldn't move it."; return; }
-      closeMenu();
-      const s = sessionOf(t);
-      if (s) s.category = key;
-      render();
-      load(keyOf(t));
-    };
-    const choice = (markEl, label, key) => h('button', {
-      type: 'button', class: `menu-item${key === now ? ' current' : ''}`, role: 'menuitemradio',
-      'aria-checked': String(key === now), onclick: () => move(key),
-    }, markEl ?? icon('tag'), h('span', {}, label), key === now && icon('check'));
-    fill(title,
-      ...S.categories.map(c => choice(mark(c.icon), c.label, c.key)),
-      choice(icon('x'), 'No category', ''),
-      err);
+  /** @type {MenuKit} */
+  const kit = {
+    fill: (...kids) => body.replaceChildren(...kids.flat().filter(Boolean)),  // replaceChildren would print false
+    item: (ic, text, onclick, cls = '') => h('button', { type: 'button', class: `menu-item ${cls}`, role: 'menuitem', onclick },
+      typeof ic === 'string' ? icon(ic) : ic, h('span', {}, text)),
+    error: () => h('div', { class: 'create-error', role: 'alert' }),
+    focus: () => requestAnimationFrame(() => /** @type {HTMLElement | null} */ (body.querySelector('input, button'))?.focus()),
   };
-
-  const rename = () => {
-    const err = error();
-    const input = h('input', {
-      class: 'create-input', value: openable(t) ? nameOf(t) : nameOf(t).replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 32),
-      maxLength: 32, autocomplete: 'off', autocapitalize: 'off', spellcheck: false, enterKeyHint: 'done',
-      'aria-label': `New name for ${nameOf(t)}`, oninput: () => { err.textContent = ''; },
-    });
-    const save = h('button', { type: 'submit', class: 'btn primary' }, 'Rename');
-    fill(title, h('form', {
-      class: 'menu-form',
-      onsubmit: async e => {
-        e.preventDefault();
-        const name = input.value.trim().replace(/\s+/g, '-');
-        if (name === nameOf(t)) return closeMenu();
-        if (!NAME_RE.test(name)) { err.textContent = 'Use letters, digits, - and _ (up to 32).'; return input.focus(); }
-        if (placeOf(t)?.sessions.some(s => s.name === name)) { err.textContent = `There's already a ${name}.`; return input.focus(); }
-        save.disabled = true;
-        const r = await runHub(['--rename', t, name]);
-        if (!r.ok) { save.disabled = false; err.textContent = r.message || "Couldn't rename it."; return; }
-        closeMenu();
-        renamed(t, `${keyOf(t)}:${name}`);
-      },
-    }, h('div', { class: 'create-row' }, input, save), err));
-    input.focus();
-    input.select();
-  };
-
-  const confirmKill = () => {
-    const err = error();
-    const kill = h('button', {
-      type: 'button', class: 'btn danger',
-      onclick: async () => {
-        kill.disabled = true;
-        const r = await runHub(['--kill', t]);
-        if (!r.ok) { kill.disabled = false; err.textContent = r.message || "Couldn't kill it."; return; }
-        closeMenu();
-        killed(t);
-      },
-    }, 'Kill');
-    fill(title,
-      h('p', { class: 'menu-text' }, 'Kill ', h('b', {}, nameOf(t)), '? Everything running in it stops.'),
-      h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), kill),
-      err);
-    kill.focus();
-  };
-
-  choose();
-  requestAnimationFrame(() => /** @type {HTMLElement | null} */ (body.querySelector('button, input'))?.focus());
+  build(kit);
+  kit.focus();
   if (wide()) {
-    menu = h('div', { class: 'menu', role: 'menu', 'aria-label': nameOf(t) }, body);
+    menu = h('div', { class: 'menu', role: 'menu', 'aria-label': label }, body);
     document.body.append(menu);
     const r = at instanceof Element ? at.getBoundingClientRect() : { left: at.x, right: at.x, top: at.y, bottom: at.y };
     const place = () => {
@@ -879,7 +816,7 @@ function sessionMenu(t, at) {
       menu.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 8))}px`;
     };
     place();
-    new ResizeObserver(place).observe(menu);  // the rename and kill steps change its size
+    new ResizeObserver(place).observe(menu);  // its steps (a form, a question) change its size
     // A press anywhere else closes it (the press that opened it is over by now).
     document.addEventListener('pointerdown', function off(e) {
       const target = /** @type {Node} */ (e.target);
@@ -888,10 +825,201 @@ function sessionMenu(t, at) {
     }, true);
   } else {
     menu = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === menu) closeMenu(); } },
-      h('div', { class: 'sheet menu-sheet', role: 'dialog', 'aria-label': nameOf(t) }, h('div', { class: 'sheet-grip' }), body));
+      h('div', { class: 'sheet menu-sheet', role: 'dialog', 'aria-label': label }, h('div', { class: 'sheet-grip' }), body));
     document.body.append(menu);
   }
 }
+
+/** @param {string} t @param {Element | {x: number, y: number}} at */
+function sessionMenu(t, at) {
+  openMenu(at, nameOf(t), ({ fill, item, error, focus }) => {
+    const title = !wide() && h('div', { class: 'menu-title', style: `--c:${colourOf(t)}` },
+      placeMark(placeOf(t)), h('b', {}, nameOf(t)), h('small', {}, labelOf(t)));
+    const kit = { fill, item, error, focus };
+
+    const choose = () => fill(title,
+      wide() && openable(t) && !visible().includes(t) && item('columns-2', 'Open in a new pane', () => { closeMenu(); openBeside(t); }),
+      item('pencil', 'Rename', rename),
+      item('tag', 'Move to category', pickCategory),
+      item('trash-2', 'Kill session', confirmKill, 'danger'));
+
+    const moveTo = async key => {
+      const r = await runHub(['--category', t, key || '-']);
+      if (!r.ok) return r.message || "Couldn't move it.";
+      closeMenu();
+      const s = sessionOf(t);
+      if (s) s.category = key;
+      render();
+      load(keyOf(t));
+      return '';
+    };
+
+    const pickCategory = () => {
+      const err = error();
+      const now = sessionOf(t)?.category ?? '';
+      const choice = (markEl, label, key) => h('button', {
+        type: 'button', class: `menu-item${key === now ? ' current' : ''}`, role: 'menuitemradio',
+        'aria-checked': String(key === now), onclick: async () => { err.textContent = await moveTo(key); },
+      }, markEl ?? icon('tag'), h('span', {}, label), key === now && icon('check'));
+      fill(title,
+        S.categories.map(c => choice(mark(c.icon), c.label, c.key)),
+        S.categories.length > 0 && choice(icon('x'), 'No category', ''),
+        item('plus', 'New category…', newCategory),
+        err);
+      focus();
+    };
+
+    const newCategory = () => {
+      const s = sessionOf(t);
+      // A rule for the session's folder, ticked unless it's one that catches nearly everything.
+      const broad = /^\/(?:(?:home|Users)\/[^/]+|root|tmp)?\/?$/.test(s?.path ?? '');
+      const box = s?.path ? h('input', { type: 'checkbox', checked: !broad }) : null;
+      fill(title, categoryForm(kit, {
+        submitLabel: 'Create',
+        extra: box && h('label', { class: 'menu-check' }, box, h('span', {}, 'Also sessions started in ', h('b', {}, shortPath(s?.path ?? '')))),
+        submit: async (label, ic) => {
+          const folder = box?.checked && s?.path ? [glob(s.path), `${glob(s.path)}/*`] : [];
+          const made = await runHub(['--new-category', label, ic, ...folder]);
+          if (!made.ok) return made.message || "Couldn't make it.";
+          S.categories = [...S.categories, { key: made.message, label, icon: ic, editable: true }];
+          return moveTo(made.message);
+        },
+      }));
+      focus();
+    };
+
+    const rename = () => {
+      const err = error();
+      const input = h('input', {
+        class: 'create-input', value: openable(t) ? nameOf(t) : nameOf(t).replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 32),
+        maxLength: 32, autocomplete: 'off', autocapitalize: 'off', spellcheck: false, enterKeyHint: 'done',
+        'aria-label': `New name for ${nameOf(t)}`, oninput: () => { err.textContent = ''; },
+      });
+      const save = h('button', { type: 'submit', class: 'btn primary' }, 'Rename');
+      fill(title, h('form', {
+        class: 'menu-form',
+        onsubmit: async e => {
+          e.preventDefault();
+          const name = input.value.trim().replace(/\s+/g, '-');
+          if (name === nameOf(t)) return closeMenu();
+          if (!NAME_RE.test(name)) { err.textContent = 'Use letters, digits, - and _ (up to 32).'; return input.focus(); }
+          if (placeOf(t)?.sessions.some(s => s.name === name)) { err.textContent = `There's already a ${name}.`; return input.focus(); }
+          save.disabled = true;
+          const r = await runHub(['--rename', t, name]);
+          if (!r.ok) { save.disabled = false; err.textContent = r.message || "Couldn't rename it."; return; }
+          closeMenu();
+          renamed(t, `${keyOf(t)}:${name}`);
+        },
+      }, h('div', { class: 'create-row' }, input, save), err));
+      input.focus();
+      input.select();
+    };
+
+    const confirmKill = () => {
+      const err = error();
+      const kill = h('button', {
+        type: 'button', class: 'btn danger',
+        onclick: async () => {
+          kill.disabled = true;
+          const r = await runHub(['--kill', t]);
+          if (!r.ok) { kill.disabled = false; err.textContent = r.message || "Couldn't kill it."; return; }
+          closeMenu();
+          killed(t);
+        },
+      }, 'Kill');
+      fill(title,
+        h('p', { class: 'menu-text' }, 'Kill ', h('b', {}, nameOf(t)), '? Everything running in it stops.'),
+        h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), kill),
+        err);
+      kill.focus();
+    };
+
+    choose();
+  });
+}
+
+/** A category made on the page: rename it, change its icon, or delete it. @param {Category} c @param {Element | {x: number, y: number}} at */
+function categoryMenu(c, at) {
+  openMenu(at, c.label, kit => {
+    const title = !wide() && h('div', { class: 'menu-title' }, h('span', { class: 'cat-mark' }, mark(c.icon) ?? icon('tag')), h('b', {}, c.label));
+    const edit = () => {
+      kit.fill(title, categoryForm(kit, {
+        label: c.label, icon: c.icon || 'tag', submitLabel: 'Save',
+        submit: async (label, ic) => {
+          const r = await runHub(['--edit-category', c.key, label, ic]);
+          if (!r.ok) return r.message || "Couldn't save it.";
+          closeMenu();
+          Object.assign(c, { label, icon: ic });
+          render();
+          load(true);
+          return '';
+        },
+      }));
+      kit.focus();
+    };
+    const confirmDelete = () => {
+      const err = kit.error();
+      const drop = h('button', {
+        type: 'button', class: 'btn danger',
+        onclick: async () => {
+          drop.disabled = true;
+          const r = await runHub(['--delete-category', c.key]);
+          if (!r.ok) { drop.disabled = false; err.textContent = r.message || "Couldn't delete it."; return; }
+          closeMenu();
+          S.categories = S.categories.filter(x => x !== c);
+          for (const p of S.places ?? []) for (const s of p.sessions) if (s.category === c.key) s.category = '';
+          render();
+          load(true);
+        },
+      }, 'Delete');
+      kit.fill(title,
+        h('p', { class: 'menu-text' }, 'Delete ', h('b', {}, c.label), '? Its sessions go back to their places.'),
+        h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), drop),
+        err);
+      drop.focus();
+    };
+    kit.fill(title, kit.item('pencil', 'Rename, or change its icon', edit), kit.item('trash-2', 'Delete category', confirmDelete, 'danger'));
+  });
+}
+
+// A category's name and icon. submit(label, icon) saves, and returns what went wrong, or ''.
+/** @param {MenuKit} kit @param {{label?: string, icon?: string, submitLabel: string, extra?: any, submit: (label: string, icon: string) => Promise<string>}} o */
+function categoryForm(kit, o) {
+  const err = kit.error();
+  let chosen = o.icon ?? 'folder';
+  const input = h('input', {
+    class: 'create-input', value: o.label ?? '', maxLength: 40, placeholder: 'Name, say Website', autocomplete: 'off',
+    spellcheck: false, enterKeyHint: 'done', 'aria-label': 'Category name', oninput: () => { err.textContent = ''; },
+  });
+  const grid = h('div', { class: 'icon-grid', role: 'radiogroup', 'aria-label': 'Icon' },
+    PLACE_ICONS.map(name => h('button', {
+      type: 'button', class: `icon-pick${name === chosen ? ' on' : ''}`, role: 'radio', 'aria-checked': String(name === chosen),
+      title: name, 'aria-label': name,
+      onclick: e => {
+        chosen = name;
+        for (const b of grid.children) {
+          b.classList.toggle('on', b === e.currentTarget);
+          b.setAttribute('aria-checked', String(b === e.currentTarget));
+        }
+      },
+    }, icon(name))));
+  const save = h('button', { type: 'submit', class: 'btn primary' }, o.submitLabel);
+  return h('form', {
+    class: 'menu-form',
+    onsubmit: async e => {
+      e.preventDefault();
+      const label = input.value.trim();
+      if (!label) { err.textContent = 'Give it a name.'; return input.focus(); }
+      save.disabled = true;
+      err.textContent = await o.submit(label, chosen);
+      save.disabled = false;
+    },
+  }, input, grid, o.extra,
+  h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), save), err);
+}
+
+const glob = path => path.replace(/[*?[\]\\]/g, '\\$&');  // a folder, as a pattern that matches only it
+const shortPath = path => path.replace(/^\/(home|Users)\/[^/]+/, '~');
 
 function closeMenu() {
   if (!menu) return;
