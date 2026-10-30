@@ -1,13 +1,29 @@
 #!/usr/bin/env bash
-# share [name]: move this terminal into a tmux session so it also shows up in the
-# terminal hub on the phone. Detach (Ctrl-b d) to get back to the plain shell; the
-# session keeps running until you `exit` it.
+# share [name] [-- command...]: move this terminal into a tmux session so it also shows up in
+# the terminal hub on the phone. Detach (Ctrl-b d) to get back to the plain shell; the session
+# keeps running until you `exit` it.
+#
+# With a command, the session runs just that command and closes when it exits, e.g.
+#   share -- claude          (a shell function like `cc() { share -- claude "$@"; }` saves typing)
+name= cmd=()
+if [[ -n ${1:-} && $1 != -- ]]; then name=$1; shift; fi
+[[ ${1:-} == -- ]] && { shift; cmd=("$@"); }
+
 if [ -n "$TMUX" ]; then
+  ((${#cmd[@]})) && exec "${cmd[@]}"
   echo "already shared as tmux session: $(tmux display-message -p '#S')"
   exit 0
 fi
-base=${1:-$(basename "$PWD")}
+base=${name:-$(basename "$PWD")}
 base=${base//[.:]/_}
 name=$base i=2
 while tmux has-session -t "=$name" 2>/dev/null; do name="$base-$((i++))"; done
+
+if ((${#cmd[@]})); then
+  # Resolve the command here: the tmux server may have started with a shorter PATH (for
+  # example from the hub's service), so pass this shell's PATH on to the session as well.
+  p=$(type -P "${cmd[0]}") || { echo "share: ${cmd[0]}: command not found"; exit 127; }
+  cmd[0]=$p
+  exec tmux new-session -s "$name" -c "$PWD" -e "PATH=$PATH" -- "${cmd[@]}"
+fi
 exec tmux new-session -s "$name" -c "$PWD"

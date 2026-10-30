@@ -22,7 +22,8 @@ makes TUI apps like Claude Code usable from a phone. The page installs as an app
   within 4 seconds, the app opens another URL, say the same hub on an always-on server.
 - **Matching tmux look**: a quiet status line tagged with where you are, and window sizes that follow
   whichever screen you used last.
-- **`share`** moves a desktop terminal into tmux so it shows up in the list.
+- **`share`** moves a desktop terminal into tmux so it shows up in the list. `share -- claude`
+  starts a program straight in a shared session, which closes when the program exits.
 
 ## Security
 
