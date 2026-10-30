@@ -57,7 +57,7 @@ cp web/serve-assets.py "$SHARE/"
 cp tmux/hub.conf "$SHARE/tmux.conf"
 cp web/FiraCodeNF.woff2 icons/app-{32,192,512}.png "$SHARE/assets/"
 
-# The page (ttyd's + head.html + keys.js), the manifest, and the fallback service worker.
+# The page (ttyd's + head.html + sessions.js + keys.js), the manifest, and the fallback service worker.
 export HUB_NAME HUB_SHORT_NAME HUB_APP_ID HUB_DESCRIPTION HUB_FALLBACK HUB_FALLBACK_NAME HERE
 PYTHONUTF8=1 python3 -I - "$tmp/ttyd.html" "$SHARE" <<'PY'
 import hashlib, html, json, os, re, sys
@@ -103,7 +103,8 @@ page = re.sub(r'<link[^>]*rel="icon"[^>]*>', "", page, count=1)  # ttyd's favico
 i = page.index("</head>")
 page = page[:i] + head + page[i:]
 i = page.rindex("</body>")
-page = page[:i] + "<script>" + Path("web/keys.js").read_text(encoding="utf-8") + "</script>" + page[i:]
+scripts = "".join(f"<script>{Path('web', js).read_text(encoding='utf-8')}</script>" for js in ("sessions.js", "keys.js"))
+page = page[:i] + scripts + page[i:]
 (share / "index.html").write_text(page, encoding="utf-8")
 PY
 

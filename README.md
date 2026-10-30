@@ -4,17 +4,24 @@ Every tmux session on your machines in one web terminal that works on a phone.
 
 terminal-hub is a thin layer over [ttyd](https://github.com/tsl0922/ttyd). Open the page and you get an
 fzf list of tmux sessions: this machine's, plus any you can reach over ssh or as another user. Tap one
-to attach. A key bar adds what a phone keyboard lacks (esc, shift-tab, arrows, ctrl, paste), which
-makes TUI apps like Claude Code usable from a phone. The page installs as an app.
+to attach, and switch between them from a session panel without reloading. A key bar adds what a phone
+keyboard lacks (esc, shift-tab, arrows, ctrl, paste), which makes TUI apps like Claude Code usable from
+a phone. The page installs as an app.
 
-![On a phone: the session list across three places, and a session open in vim with the key bar](docs/screenshot.png)
+![On a phone: the session panel open over a session, and a session in vim with the key bar](docs/screenshot.png)
+
+![On a desktop: the session sidebar next to a session in vim](docs/desktop.png)
 
 ## Features
 
 - **One list across machines.** Each *place* in the config is tmux somewhere: here, on another machine
   over ssh, or as another user through sudo. Rows get a coloured tag per place, and a place that can't be
   reached says so (or, if its ssh key is locked, offers to unlock it).
-- **Phone key bar.** esc, ⇧tab, arrows, tab, a sticky ctrl, ^C, paste, back to the list, new session,
+- **Switching without reloads.** A session panel lists every session on every place: a sidebar on wide
+  screens, a sheet behind the key bar's *sessions* button on a phone. Tap one and the page detaches and
+  attaches in place. *last* jumps back to the previous session, and on a desktop alt+↑ / alt+↓ step
+  through the list. The address follows the open session, so a reload or a bookmark comes back to it.
+- **Phone key bar.** esc, ⇧tab, arrows, tab, a sticky ctrl, ^C, paste, sessions, last, new session,
   font size. Swipes scroll tmux history.
 - **Links.** `/?arg=NAME` opens a session, creating it if needed. `/?arg=KEY:NAME` does the same in
   another place, and `/?arg=new` starts a fresh one.
@@ -29,7 +36,8 @@ makes TUI apps like Claude Code usable from a phone. The page installs as an app
 
 ttyd gives a shell to anyone who can reach it. terminal-hub listens on 127.0.0.1 only. Publish it
 through something that authenticates, such as `tailscale serve` (tailnet only). Never expose ports 7682
-and 7683 directly or behind a reverse proxy without auth.
+and 7683 directly or behind a reverse proxy without auth. The asset server on 7683 also answers
+`/assets/sessions.json`, the session list behind the panel.
 
 ## Install
 
@@ -75,7 +83,8 @@ place box    sandbox '#79c0ff' via sudo -n -u sandbox bash -c  # another user's 
 The first place is "here". ssh places need key login, because listing runs with `BatchMode`. A key with
 a passphrase works if an ssh-agent holds it (`AddKeysToAgent` in `~/.ssh/config`): while it's locked, the
 place shows "locked, tap to unlock", and tapping it asks for the passphrase once. Session names are
-letters, digits, `-` and `_`.
+letters, digits, `-` and `_`. Switching leaves a session with that place's tmux prefix and `d`, so a
+custom prefix works as long as `d` still detaches.
 
 ## Updating
 

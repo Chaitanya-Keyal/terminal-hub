@@ -1,4 +1,5 @@
 // Phone extras for the terminal hub (ttyd): extra-keys bar, Nerd Font, persisted font size.
+// The bar's sessions / last / new buttons call web/sessions.js.
 (() => {
   const FONT = '"FiraCode NF", monospace';
   const BG = '#0b0d10';  // the hub's background; ttyd's default grey would frame the terminal
@@ -29,20 +30,12 @@
     '|',
     ['paste', async () => { const t = await navigator.clipboard.readText(); term()?.paste(t); term()?.focus(); }],
     '|',
-    ['hub', () => { location.href = location.origin + '/'; }, 'nav'],   // back to the picker; sessions keep running
-    ['new', newSession, 'nav'],
+    ['sessions', () => window.hub?.toggle(), 'nav'],   // the session panel (web/sessions.js)
+    ['last', () => window.hub?.last(), 'nav'],
+    ['new', () => window.hub?.newSession(), 'nav'],
     '|',
     ['A−', () => setSize(size - 1)], ['A+', () => setSize(size + 1)],
   ];
-
-  // Reconnect via ttyd's ?arg= (see bin/terminal-hub); the old session keeps running.
-  function newSession() {
-    const name = prompt('New session name (blank = auto):');
-    if (name === null) return term()?.focus();
-    const n = name.trim().replace(/\s+/g, '-');
-    if (n && !/^[A-Za-z0-9_-]{1,32}$/.test(n)) return alert('Use letters, digits, - and _ only.');
-    location.search = '?arg=' + encodeURIComponent(n || 'new');
-  }
 
   function setCtrl(on) { ctrl = on; document.getElementById('k-ctrl')?.classList.toggle('on', on); }
   function setSize(s) { size = Math.max(7, Math.min(24, s)); localStorage.setItem(SIZE_KEY, size); sync(); }
@@ -55,6 +48,7 @@
       const [label, fn, cls] = k;
       const b = document.createElement('button');
       b.textContent = label;
+      b.dataset.key = label;
       if (cls) b.className = cls;
       if (label === 'ctrl') { b.id = 'k-ctrl'; b.onclick = () => { setCtrl(!ctrl); term()?.focus(); }; }
       else b.onclick = fn;
