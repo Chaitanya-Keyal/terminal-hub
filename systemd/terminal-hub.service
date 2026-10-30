@@ -4,8 +4,9 @@ Wants=terminal-hub-assets.service
 
 [Service]
 # Localhost only. ttyd hands a shell to anyone who can reach it: publish it through something
-# that authenticates, like `tailscale serve`, never directly.
-ExecStart=ttyd --interface 127.0.0.1 --port 7682 --writable \
+# that authenticates, like `tailscale serve`, never directly. --check-origin refuses terminal
+# connections opened by other websites in your browser.
+ExecStart=ttyd --interface 127.0.0.1 --port 7682 --writable --check-origin \
   --index %h/.local/share/terminal-hub/index.html --url-arg \
   --client-option disableLeaveAlert=true \
   --client-option disableResizeOverlay=true \
