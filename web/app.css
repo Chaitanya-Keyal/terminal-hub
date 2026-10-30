@@ -57,6 +57,9 @@ kbd .icon { width: 12px; height: 12px; }
 .btn:hover { background: var(--raise-3); }
 .btn.primary { background: var(--accent); border-color: transparent; color: #08110a; font-weight: 600; }
 .btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { background: #da3633; border-color: transparent; color: #fff; font-weight: 600; }
+.btn.danger:hover { filter: brightness(1.1); }
+.btn:disabled { opacity: .6; pointer-events: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--muted)); flex: none; }
 .brand { display: flex; align-items: center; gap: 9px; min-width: 0; font-weight: 600; color: var(--text); }
 .brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -105,9 +108,11 @@ kbd .icon { width: 12px; height: 12px; }
 .row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
 .row-meta { color: var(--faint); font-size: 12px; white-space: nowrap; }
 .row.off .row-main { opacity: .5; }
-.row-split { position: absolute; right: 2px; opacity: 0; }
-.row:hover .row-split, .row-split:focus-visible { opacity: 1; }
+.row-split, .row-more { position: absolute; right: 2px; opacity: 0; }
+.row-split { right: 30px; }
+.row:hover :is(.row-split, .row-more), :is(.row-split, .row-more):focus-visible { opacity: 1; }
 .row:hover .row-meta { visibility: hidden; }
+.wide .row:hover .row-main { padding-right: 62px; }
 .st { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .st-working { background: var(--working); animation: pulse 1.6s ease-in-out infinite; }
 .st-waiting { background: var(--waiting); box-shadow: 0 0 0 3px rgba(227, 179, 65, .2); }
@@ -260,6 +265,8 @@ kbd .icon { width: 12px; height: 12px; }
 .narrow .row-main { height: 50px; padding: 0 12px; gap: 11px; border-radius: 10px; }
 .narrow .row-name { font-size: 16px; }
 .narrow .row-meta { font-size: 13px; }
+.narrow .row-more { position: static; opacity: 1; width: 40px; height: 40px; color: var(--faint); }
+.narrow .row-more .icon { width: 20px; height: 20px; }
 .narrow .row.open .row-main::before { top: 13px; bottom: 13px; }
 .narrow .st { width: 8px; height: 8px; }
 .narrow .note.small { padding-left: 32px; font-size: 13px; }
@@ -293,6 +300,33 @@ kbd .icon { width: 12px; height: 12px; }
 .stepper .icon-btn { width: 44px; height: 44px; background: var(--raise-2); border-radius: 10px; color: var(--text); }
 .stepper .icon-btn .icon { width: 20px; height: 20px; }
 .stepper .value { min-width: 32px; text-align: center; font-variant-numeric: tabular-nums; }
+/* A session's menu: a popover on a desktop, a sheet on a phone. */
+.menu {
+  position: fixed; z-index: 45; width: 250px; padding: 6px;
+  background: var(--raise); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 16px 40px rgba(0, 0, 0, .55);
+}
+.menu-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.menu-item {
+  display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: var(--radius);
+  color: var(--text-2); text-align: left; font-size: 13px;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--raise-2); color: var(--text); }
+.menu-item .icon { color: var(--muted); }
+.menu-item.danger, .menu-item.danger .icon { color: #ff7b72; }
+.menu-item.danger:hover { background: rgba(255, 123, 114, .12); }
+.menu-form { padding: 4px; }
+.menu-text { margin: 6px 6px 10px; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+.menu-text b { color: var(--text); }
+.menu-actions { display: flex; justify-content: flex-end; gap: 6px; padding: 0 4px 4px; }
+.menu-body > .create-error { padding: 0 6px 4px; }
+.menu-title { display: flex; align-items: center; gap: 9px; padding: 0 4px 12px; }
+.menu-title b { font-size: 17px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-title small { color: var(--muted); font-size: 13px; }
+.menu-sheet .menu-item { height: 50px; gap: 14px; padding: 0 12px; border-radius: 10px; font-size: 16px; }
+.menu-sheet .menu-item .icon { width: 20px; height: 20px; }
+.menu-sheet .menu-text { font-size: 15px; }
+.menu-sheet .btn { height: 44px; padding: 0 18px; border-radius: 10px; font-size: 15px; }
+.menu-sheet .create-input { height: 44px; font-size: 16px; border-radius: 10px; }
 .modal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(0, 0, 0, .55); }
 .modal-box {
   display: flex; flex-direction: column; width: min(720px, 94vw); height: min(420px, 72vh); overflow: hidden;

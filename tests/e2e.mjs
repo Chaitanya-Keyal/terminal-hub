@@ -110,7 +110,21 @@ try {
   await row(page, 'my notes').locator('.row-main').click();
   check('... and a click explains, without connecting', await until(async () => (await page.locator('#toast').textContent()).includes('rename it'))
     && (await page.locator('#panes .pane').count()) === 1 && !clients('laptop').includes('my notes'));
-  tmux('laptop', 'kill-session', '-t', 'my notes');
+  await row(page, 'my notes').hover();
+  await row(page, 'my notes').locator('.row-more').click();
+  await page.locator('.menu .menu-item', { hasText: 'Rename' }).click();
+  check('rename suggests a name the hub can open', (await page.locator('.menu .create-input').inputValue()) === 'my-notes');
+  await page.locator('.menu .create-input').fill('notes');
+  await page.keyboard.press('Enter');
+  check('the ⋯ menu renames a session', await until(() => sessions('laptop').includes('notes') && !sessions('laptop').includes('my notes'))
+    && await until(async () => (await names(page)).includes('notes')), sessions('laptop').join());
+  check('... which the hub can then open', await until(() => row(page, 'notes').evaluate(el => !el.classList.contains('off'))));
+  await row(page, 'notes').click({ button: 'right' });
+  await page.locator('.menu .menu-item', { hasText: 'Kill session' }).click();
+  check('killing asks first', await page.locator('.menu .menu-text', { hasText: 'Everything running in it stops' }).isVisible() && sessions('laptop').includes('notes'));
+  await page.locator('.menu .btn.danger').click();
+  check('right-click opens the menu too, and it kills the session', await until(() => !sessions('laptop').includes('notes'))
+    && await until(async () => !(await names(page)).includes('notes')), sessions('laptop').join());
 
   await page.locator('#sidebar .place', { hasText: 'server' }).locator('.icon-btn.add').click();
   check('"+" opens a name field, focused', await until(() => page.locator('.create-input').evaluate(el => el === document.activeElement)));
@@ -133,8 +147,23 @@ try {
   await page.locator('.term-card button', { hasText: 'Reattach' }).click();
   check('reattach works', await until(async () => clients('server').includes('shell') && !(await page.locator('.term-card').isVisible())));
 
-  tmux('server', 'kill-session', '-t', 'shell');
-  check('a session that ends closes its pane, with a note', await until(async () => (await page.locator('#toast').textContent()).includes('shell ended')));
+  await row(page, 'shell').hover();
+  await row(page, 'shell').locator('.row-more').click();
+  await page.locator('.menu .menu-item', { hasText: 'Rename' }).click();
+  await page.locator('.menu .create-input').fill('renamed');
+  await page.keyboard.press('Enter');
+  check('renaming the open session keeps it open, under the new name', await until(() =>
+    sessions('server').includes('renamed') && clients('server').includes('renamed') && page.url().endsWith('?arg=server:renamed')), page.url());
+  await page.locator('.pane.focused .xterm').click();
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('d');
+  check('... detaching from it still reads as detached', await until(() => page.locator('.term-card', { hasText: 'Detached' }).isVisible()));
+  await page.locator('.term-card button', { hasText: 'Reattach' }).click();
+  check('... and it reattaches by its new name', await until(async () => clients('server').includes('renamed') && !(await page.locator('.term-card').isVisible())));
+
+  tmux('server', 'kill-session', '-t', 'renamed');
+  check('a session that ends closes its pane, with a note', await until(async () => (await page.locator('#toast').textContent()).includes('renamed ended')),
+    `toast: ${await page.locator('#toast').textContent()}; panes: ${await page.locator('#panes .pane').count()}; card: ${await page.locator('.term-card').allTextContents()}`);
 
   tmux('laptop', 'set-option', '-t', 'beta', '@hub-state', 'waiting');
   check('a session that needs you gets a dot', await until(() => row(page, 'beta').locator('.st-waiting').isVisible(), 9000));
@@ -169,6 +198,7 @@ try {
   await phone.goto(BASE);
   check('phone: opens on the home screen', await until(() => phone.locator('#home .row-name', { hasText: 'alpha' }).isVisible()));
   check('phone: no sidebar', !(await phone.locator('#sidebar').isVisible()));
+  check('phone: each row has its ⋯ button showing', await phone.locator('#home .row .row-more').first().isVisible());
   await row(phone, 'alpha', '#home').locator('.row-main').tap();
   check('phone: a tap opens the session with a top bar', await until(() => phone.locator('#topbar b', { hasText: 'alpha' }).isVisible()));
   check('phone: the top bar has no stray text', !(await phone.locator('#topbar').textContent()).includes('undefined'));
@@ -191,7 +221,18 @@ try {
   await phone.locator('.create-input').fill('m1');
   await phone.locator('.create .btn.primary').tap();
   check('phone: a new named session opens', await until(() => phone.locator('#topbar b', { hasText: 'm1' }).isVisible() && sessions('laptop').includes('m1')));
-  await phone.locator('#topbar .back').tap();
+  await phone.locator('#topbar .more').tap();
+  check("phone: the top bar's ⋯ opens the session's menu", await until(() => phone.locator('.menu-sheet .menu-item', { hasText: 'Kill session' }).isVisible()));
+  await phone.locator('.menu-sheet .menu-item', { hasText: 'Kill session' }).tap();
+  await phone.locator('.menu-sheet .btn.danger').tap();
+  check('phone: killing the open session goes back to the list', await until(async () => !sessions('laptop').includes('m1') && await phone.locator('#home').isVisible()),
+    `sessions: ${sessions('laptop').join()}; home: ${await phone.locator('#home').isVisible()}; toast: ${await phone.locator('#toast').textContent()}; menu: ${await phone.locator('.menu-sheet').allTextContents()}`);
+  await row(phone, 'alpha', '#home').locator('.row-main').tap();
+  await until(() => phone.locator('#topbar b', { hasText: 'alpha' }).isVisible() && clients('laptop').includes('alpha'));
+  tmux('laptop', 'kill-session', '-t', 'alpha');
+  await until(() => phone.locator('#home').isVisible());
+  await sleep(1500);
+  check("phone: a session that ends goes back to the list, and isn't made again", (await phone.locator('#home').isVisible()) && !sessions('laptop').includes('alpha'), sessions('laptop').join());
   await phone.locator('.home-head .icon-btn').tap();
   const before = await phone.locator('.stepper .value').textContent();
   await phone.locator('.stepper .icon-btn').last().tap();

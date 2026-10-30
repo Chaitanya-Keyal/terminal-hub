@@ -3,7 +3,7 @@
 // Every terminal is its own connection to ttyd (term.js); the last few hidden ones stay
 // connected, so switching back is instant. The list comes from /assets/sessions.json.
 import { icon } from './icons.js';
-import { TermView, MAC } from './term.js';
+import { TermView, MAC, runHub } from './term.js';
 import { keyBar } from './keys.js';
 
 const WIDE = matchMedia('(min-width: 900px)');
@@ -48,7 +48,8 @@ const S = {
 const views = new Map();
 /** @type {HTMLFormElement | null} */ let createEl = null;
 /** @type {{close(): void} | null} */ let modal = null;
-/** @type {HTMLElement | null} */ let sheet = null, help = null;
+/** @type {HTMLElement | null} */ let sheet = null, help = null, menu = null;
+/** @type {Element | {x: number, y: number} | null} */ let menuAnchor = null;  // what opened the menu
 /** @type {string | null} */ let pendingArg = null;
 
 const wide = () => WIDE.matches;
@@ -186,8 +187,13 @@ function sessionRow(p, s) {
   h('span', { class: 'row-name' }, s.name),
   !wide() && open ? h('span', { class: 'row-meta' }, 'open')
     : s.windows > 1 && h('span', { class: 'row-meta' }, `${s.windows} windows`));
-  return h('div', { class: `row${open ? ' open' : ''}${t === focused() ? ' focused' : ''}${ok ? '' : ' off'}`, role: 'listitem' },
-    main, wide() && ok && iconBtn('columns-2', 'Open beside', () => openBeside(t), 'row-split'));
+  return h('div', {
+    class: `row${open ? ' open' : ''}${t === focused() ? ' focused' : ''}${ok ? '' : ' off'}`, role: 'listitem',
+    oncontextmenu: e => { if (!wide() || s.starting) return; e.preventDefault(); sessionMenu(t, { x: e.clientX, y: e.clientY }); },
+  },
+  main,
+  wide() && ok && iconBtn('columns-2', 'Open beside', () => openBeside(t), 'row-split'),
+  !s.starting && iconBtn('ellipsis', `More for ${s.name}`, e => sessionMenu(t, e.currentTarget), 'row-more'));
 }
 
 function suggest(p) {
@@ -217,7 +223,6 @@ function startCreate(key) {
       const name = input.value.trim().replace(/\s+/g, '-') || fallback;
       if (!NAME_RE.test(name)) { err.textContent = 'Use letters, digits, - and _ (up to 32).'; input.focus(); return; }
       openSession(`${p.key}:${name}`);
-      setTimeout(load, 700);  // the new session shows up in the list
     },
   }, h('div', { class: 'create-row' }, input,
     h('button', { type: 'submit', class: 'btn primary' }, 'Create'),
@@ -299,6 +304,7 @@ function closePane(i) {
 
 // The session is gone (it ended) or you closed it: take it off the screen.
 function closeTarget(t) {
+  S.trusted.delete(t);  // nothing may create it again without you asking
   if (wide()) { const i = S.panes.indexOf(t); if (i >= 0) closePane(i); }
   else if (S.current === t) goHome();
   views.get(t)?.dispose();
@@ -306,9 +312,14 @@ function closeTarget(t) {
   render();
 }
 
+// Leave the session on a phone. The list shows at once: history.back() lands later, and a render
+// in between must not find the session still open (it would connect to it again).
 function goHome() {
-  if (history.state?.hub === 'session') history.back();  // popstate shows the list
-  else { S.current = null; history.replaceState({ hub: 'home' }, '', urlFor(null)); render(); }
+  const fromSession = history.state?.hub === 'session';
+  S.current = null;
+  if (fromSession) history.back();
+  else history.replaceState({ hub: 'home' }, '', urlFor(null));
+  render();
 }
 
 function last() { const t = lastTarget(); if (t) openSession(t); }
@@ -342,6 +353,7 @@ function viewFor(t) {
       copied: () => toast('Copied'),
       status: view => {
         if (view.status !== 'ended') return;
+        const t = view.target;
         toast(`${nameOf(t)} ended`);
         const p = placeOf(t);
         if (p) p.sessions = p.sessions.filter(s => s.name !== nameOf(t));
@@ -351,8 +363,9 @@ function viewFor(t) {
       },
       attached: () => load(true),
       actions: view => view.status === 'detached'
-        ? [['Reattach', () => view.connect(), true], ['Close', () => closeTarget(t)]] : null,
+        ? [['Reattach', () => view.connect(), true], ['Close', () => closeTarget(view.target)]] : null,
     }, ['--existing', t]);
+    v.target = t;
     views.set(t, v);
   }
   v.lastUsed = Date.now();
@@ -413,7 +426,8 @@ function renderTop() {
     iconBtn('chevron-left', 'All sessions', goHome, 'back'),
     h('div', { class: 'top-title' }, h('span', { class: 'dot' }), h('b', {}, nameOf(t)), h('small', {}, labelOf(t))),
     ...(lt ? [h('button', { type: 'button', class: 'last-btn', title: `Switch to ${nameOf(lt)}`, onclick: last },
-      icon('arrow-left-right'), h('span', {}, nameOf(lt)))] : []));
+      icon('arrow-left-right'), h('span', {}, nameOf(lt)))] : []),
+    iconBtn('ellipsis', `More for ${nameOf(t)}`, e => sessionMenu(t, e.currentTarget), 'more'));
 }
 
 function renderEmpty() {
@@ -593,6 +607,127 @@ function openSettings() {
   document.body.append(wrap);
 }
 
+// ---- a session's menu: rename it, or kill it ---------------------------------------------------
+// A popover by the ⋯ button (or the pointer, for a right-click) on a desktop; a sheet on a phone.
+/** @param {string} t @param {Element | {x: number, y: number}} at */
+function sessionMenu(t, at) {
+  if (menu && menuAnchor === at) return closeMenu();  // its button again: a toggle
+  closeMenu();
+  closeHelp();
+  menuAnchor = at;
+  const body = h('div', { class: 'menu-body' });
+  const fill = (...kids) => body.replaceChildren(...kids.filter(Boolean));  // replaceChildren would print false
+  const title = !wide() && h('div', { class: 'menu-title', style: `--c:${colourOf(t)}` },
+    h('span', { class: 'dot' }), h('b', {}, nameOf(t)), h('small', {}, labelOf(t)));
+  const item = (name, label, onclick, cls = '') =>
+    h('button', { type: 'button', class: `menu-item ${cls}`, role: 'menuitem', onclick }, icon(name), h('span', {}, label));
+  const error = () => h('div', { class: 'create-error', role: 'alert' });
+
+  const choose = () => fill(title,
+    wide() && openable(t) && !visible().includes(t) && item('columns-2', 'Open in a new pane', () => { closeMenu(); openBeside(t); }),
+    item('pencil', 'Rename', rename),
+    item('trash-2', 'Kill session', confirmKill, 'danger'));
+
+  const rename = () => {
+    const err = error();
+    const input = h('input', {
+      class: 'create-input', value: openable(t) ? nameOf(t) : nameOf(t).replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 32),
+      maxLength: 32, autocomplete: 'off', autocapitalize: 'off', spellcheck: false, enterKeyHint: 'done',
+      'aria-label': `New name for ${nameOf(t)}`, oninput: () => { err.textContent = ''; },
+    });
+    const save = h('button', { type: 'submit', class: 'btn primary' }, 'Rename');
+    fill(title, h('form', {
+      class: 'menu-form',
+      onsubmit: async e => {
+        e.preventDefault();
+        const name = input.value.trim().replace(/\s+/g, '-');
+        if (name === nameOf(t)) return closeMenu();
+        if (!NAME_RE.test(name)) { err.textContent = 'Use letters, digits, - and _ (up to 32).'; return input.focus(); }
+        if (placeOf(t)?.sessions.some(s => s.name === name)) { err.textContent = `There's already a ${name}.`; return input.focus(); }
+        save.disabled = true;
+        const r = await runHub(['--rename', t, name]);
+        if (!r.ok) { save.disabled = false; err.textContent = r.message || "Couldn't rename it."; return; }
+        closeMenu();
+        renamed(t, `${keyOf(t)}:${name}`);
+      },
+    }, h('div', { class: 'create-row' }, input, save), err));
+    input.focus();
+    input.select();
+  };
+
+  const confirmKill = () => {
+    const err = error();
+    const kill = h('button', {
+      type: 'button', class: 'btn danger',
+      onclick: async () => {
+        kill.disabled = true;
+        const r = await runHub(['--kill', t]);
+        if (!r.ok) { kill.disabled = false; err.textContent = r.message || "Couldn't kill it."; return; }
+        closeMenu();
+        killed(t);
+      },
+    }, 'Kill');
+    fill(title,
+      h('p', { class: 'menu-text' }, 'Kill ', h('b', {}, nameOf(t)), '? Everything running in it stops.'),
+      h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), kill),
+      err);
+    kill.focus();
+  };
+
+  choose();
+  if (wide()) {
+    menu = h('div', { class: 'menu', role: 'menu', 'aria-label': nameOf(t) }, body);
+    document.body.append(menu);
+    const r = at instanceof Element ? at.getBoundingClientRect() : { left: at.x, right: at.x, top: at.y, bottom: at.y };
+    const place = () => {
+      if (!menu) return;
+      menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 8))}px`;
+    };
+    place();
+    new ResizeObserver(place).observe(menu);  // the rename and kill steps change its size
+    // A press anywhere else closes it (the press that opened it is over by now).
+    document.addEventListener('pointerdown', function off(e) {
+      const target = /** @type {Node} */ (e.target);
+      if (menu && !menu.contains(target) && !(menuAnchor instanceof Element && menuAnchor.contains(target))) closeMenu();
+      if (!menu) document.removeEventListener('pointerdown', off, true);
+    }, true);
+  } else {
+    menu = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === menu) closeMenu(); } },
+      h('div', { class: 'sheet menu-sheet', role: 'dialog', 'aria-label': nameOf(t) }, h('div', { class: 'sheet-grip' }), body));
+    document.body.append(menu);
+  }
+}
+
+function closeMenu() { menu?.remove(); menu = menuAnchor = null; }
+
+// A session has a new name: everything that knew it by the old one follows.
+function renamed(old, t) {
+  const v = views.get(old);
+  if (v) { views.delete(old); views.set(t, v); v.target = t; v.args = [t]; v.again = ['--existing', t]; }
+  S.panes = S.panes.map(x => (x === old ? t : x));
+  if (S.current === old) { S.current = t; history.replaceState({ hub: 'session', target: t }, '', urlFor(t)); }
+  S.recent = S.recent.map(x => (x === old ? t : x));
+  store.set('recent', S.recent);
+  if (old in S.seen) { S.seen[t] = S.seen[old]; delete S.seen[old]; store.set('seen', S.seen); }
+  if (S.trusted.delete(old)) S.trusted.add(t);
+  const s = sessionOf(old);
+  if (s) s.name = nameOf(t);
+  toast(`Renamed to ${nameOf(t)}`);
+  render();
+  load(true);
+}
+
+function killed(t) {
+  const p = placeOf(t);
+  if (p) p.sessions = p.sessions.filter(s => s.name !== nameOf(t));
+  starting.delete(t);
+  if (views.has(t)) closeTarget(t);
+  toast(`Killed ${nameOf(t)}`);
+  render();
+  load(true);
+}
+
 function unlock(p) {
   modal?.close();
   const body = h('div', { class: 'modal-body' });
@@ -624,7 +759,7 @@ function toast(text, ms = 1800) {
 
 // ---- keyboard, history, layout changes ---------------------------------------------------
 addEventListener('keydown', e => {
-  if (e.key === 'Escape' && help) { e.preventDefault(); e.stopPropagation(); return closeHelp(); }
+  if (e.key === 'Escape' && (help || menu)) { e.preventDefault(); e.stopPropagation(); closeMenu(); return closeHelp(); }
   if (!wide() || !e.altKey || e.ctrlKey || e.metaKey) return;
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     const list = allTargets();

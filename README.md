@@ -25,7 +25,8 @@ server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xte
   Swipes scroll tmux history, and the page installs as an app.
 - **Agent status:** a blue dot while an agent works, yellow when it waits for you (a permission
   prompt or a question; also counted in the tab title), green when it's done, until you look.
-- **New sessions** from the list: press + by a place, type a name or leave it blank.
+- **New sessions** from the list: press + by a place, type a name or leave it blank. Each session's
+  ⋯ menu renames it or kills it (after asking).
 - **`share`** moves the terminal you're in into tmux, so it shows up in the list. `share -- claude`
   starts a program in its own session.
 
@@ -47,7 +48,8 @@ Everything runs on one machine, the hub. Each session you open in the page is it
 connection to ttyd, which runs `terminal-hub KEY:NAME` to attach to that tmux session: directly,
 over ssh, or through sudo. The list comes from `terminal-hub --list`, which asks every place for
 its sessions at once. When a session closes, `terminal-hub` tells the page why (you detached,
-the session ended, or the connection dropped), so the page can offer to reattach.
+the session ended, or the connection dropped), so the page can offer to reattach. Renaming and
+killing a session run `terminal-hub --rename` and `--kill` through ttyd the same way.
 
 The other machines run nothing new: they need tmux, and ssh key login from the hub.
 
@@ -112,7 +114,8 @@ answer within 4 seconds, say the same hub on an always-on server.
 ## Using it
 
 **Desktop.** Click a session to open it. Shift+click, or the split button that appears on hover,
-opens it in a new pane beside the others. The keyboard button at the bottom of the sidebar lists
+opens it in a new pane beside the others. The ⋯ button next to it, or a right-click on it, renames
+or kills it. The keyboard button at the bottom of the sidebar lists
 the shortcuts, and common tmux keys after the open session's tmux prefix:
 
 | | |
@@ -127,7 +130,7 @@ With tmux's mouse mode on, tmux gets plain drags and right-clicks (its own menu)
 to the page instead. On a Mac, use ⌥ rather than Shift.
 
 **Phone.** Tap a session to open it, and use the back button (or the browser's) to return to the
-list. The top bar's swap button jumps to the last session. ctrl on the key bar applies to the next
+list. The ⋯ on each session, and the one in the top bar, rename or kill it. The top bar's swap button jumps to the last session. ctrl on the key bar applies to the next
 key; arrows repeat while held. The gear on the home screen sets the text size.
 
 **Links.** `/?arg=KEY:NAME` opens session NAME on place KEY, creating it if it doesn't exist.
@@ -189,7 +192,8 @@ cc() { share -- claude "$@"; }       # cc --resume
 ttyd gives a shell to anyone who can reach it, so both services listen on 127.0.0.1 only. Publish
 them only through something that authenticates, such as `tailscale serve` (tailnet only), and never
 expose ports 7682 and 7683 directly. ttyd runs with `--check-origin`, so other websites can't open
-terminals through your browser. The session list (`/assets/sessions.json`) shows session names; it's
+terminals through your browser. Everything that changes something (opening, creating, renaming
+or killing a session) goes through ttyd; `server.py` only reads. The session list (`/assets/sessions.json`) shows session names; it's
 published the same way as the rest.
 
 ## Updating and removing

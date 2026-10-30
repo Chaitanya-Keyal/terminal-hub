@@ -31,6 +31,38 @@ export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 let tokenPromise = null;
 const authToken = () => (tokenPromise ??= fetch('/token').then(r => r.json()).then(j => j.token || '').catch(() => ''));
 
+const wsUrl = args => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?${args.map(a => 'arg=' + encodeURIComponent(a)).join('&')}`;
+
+// Run one terminal-hub command that answers with OSC 7766 ("ok" or "failed;MESSAGE"), such as
+// ['--kill', 'laptop:notes'], through ttyd like a terminal (so ttyd's origin check covers it).
+/** @returns {Promise<{ok: boolean, message: string}>} */
+export async function runHub(args) {
+  const token = await authToken();
+  return new Promise(resolve => {
+    const ws = new WebSocket(wsUrl(args), ['tty']);
+    const dec = new TextDecoder();
+    let out = '', settled = false;
+    const done = (ok, message) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ws.close();
+      resolve({ ok, message });
+    };
+    const timer = setTimeout(() => done(false, 'No answer'), 20000);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => ws.send(enc.encode(JSON.stringify({ AuthToken: token, columns: 80, rows: 24 })));
+    ws.onmessage = e => {
+      const d = new Uint8Array(e.data);
+      if (d[0] !== 48) return;
+      out += dec.decode(d.subarray(1), { stream: true });
+      const m = out.match(/\x1b\]7766;([^\x07]*)\x07/);
+      if (m) { const [result, ...msg] = m[1].split(';'); done(result === 'ok', msg.join(';')); }
+    };
+    ws.onclose = () => done(false, out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trim() || 'No answer');
+  });
+}
+
 export function ctrlOf(d) {
   const c = d.toLowerCase().charCodeAt(0);
   if (c >= 97 && c <= 122) return String.fromCharCode(c - 96);
@@ -45,6 +77,7 @@ export class TermView {
   constructor(args, hooks, again = args) {
     this.args = args;
     this.again = again;
+    this.target = '';  // the page's name for the session (KEY:NAME); a rename changes it
     this.connections = 0;
     this.hooks = hooks;
     this.status = 'connecting';  // connecting | open | reconnecting | detached | ended | unlocked | failed
@@ -123,8 +156,7 @@ export class TermView {
     this.setStatus(this.retries ? 'reconnecting' : 'connecting');
     const token = await authToken();
     if (this.disposed) return;
-    const query = (this.connections++ ? this.again : this.args).map(a => 'arg=' + encodeURIComponent(a)).join('&');
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?${query}`, ['tty']);
+    const ws = new WebSocket(wsUrl(this.connections++ ? this.again : this.args), ['tty']);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       ws.send(enc.encode(JSON.stringify({ AuthToken: token, columns: this.term.cols, rows: this.term.rows })));

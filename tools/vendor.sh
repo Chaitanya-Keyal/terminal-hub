@@ -10,8 +10,9 @@ XTERM=(@xterm/xterm@6.0.0 @xterm/addon-fit@0.11.0 @xterm/addon-webgl@0.19.0
   @xterm/addon-unicode11@0.9.0 @xterm/addon-web-links@0.12.0)
 LUCIDE=1.65.0
 ICONS=(a-arrow-down a-arrow-up arrow-down arrow-left arrow-left-right arrow-left-to-line arrow-right
-  arrow-right-to-line arrow-up check chevron-left clipboard-paste columns-2 history keyboard
-  loader-circle lock panel-left plus rotate-cw search settings square-terminal unplug wifi-off x)
+  arrow-right-to-line arrow-up check chevron-left clipboard-paste columns-2 ellipsis history keyboard
+  loader-circle lock panel-left pencil plus rotate-cw search settings square-terminal trash-2 unplug
+  wifi-off x)
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
