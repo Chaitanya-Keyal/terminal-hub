@@ -199,8 +199,9 @@ jq --slurpfile h integrations/claude-code.json \
 ```
 
 Every hook runs `~/.local/bin/hub-state hook`, which reads the event and sets the dot: working
-when you send a message, waiting when a permission prompt or a question opens, working again once
-that tool runs, done when the turn ends (on an error too), cleared when Claude exits. A subagent
+when you send a message, waiting when a permission prompt or a question opens, working again as
+soon as you answer (no hook says so, so `hub-state` watches the prompt close; after a no, Claude
+waits for you, and the dot stays), done when the turn ends (on an error too), cleared when Claude exits. A subagent
 finishing its work doesn't hide a question the main agent is asking you. Outside tmux the hooks do
 nothing. One gap: Claude Code has no hook for interrupting it with Esc, so after that the dot stays
 blue until your next message.
@@ -278,7 +279,8 @@ restarts ttyd, and open pages reconnect.
   site's settings (the lock or tune icon next to the address), then turn the bell on again.
 - **No notifications, though they're allowed:** turning the bell on shows a sample. If even that
   doesn't appear, the system hides the browser's notifications: on Windows, check Settings →
-  System → Notifications for your browser, and Do not disturb. A browser that forgets the
+  System → Notifications (the switch at the top, which covers every app, then your browser), and
+  Do not disturb. A browser that forgets the
   permission when it closes (Edge: "Choose what to clear every time you close the browser", Site
   permissions) turns the bell off again on the next visit.
 

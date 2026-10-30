@@ -32,20 +32,53 @@ clear_mark() {
     set-option -qu -t "$pane" @hub-wait 2>/dev/null
 }
 
+# watch AGENT TRANSCRIPT: no hook fires when you answer a permission dialog (the next one comes
+# when the tool finishes, which can take minutes), so this watches the pane instead, in the
+# background: once the dialog's last line ("Esc to cancel ...") is gone, it's working again.
+# Unless you said no (or pressed Esc): then Claude Code adds "STOP ... wait for the user" to the
+# transcript and waits for you. (Questions don't need this: answering one finishes its tool.)
+# It stops when anything else changes the mark, and when no dialog shows up within 5 s.
+watch() {
+  local seen=0 i size
+  size=$(wc -c <"$2" 2>/dev/null)  # only what's written after this counts
+  for ((i = 0; i < 7200; i++)); do
+    sleep 0.5
+    [ "$(tmux display-message -p -t "$pane" '#{@hub-state}|#{@hub-wait}' 2>/dev/null)" = "waiting|$1" ] || return
+    if tmux capture-pane -p -t "$pane" 2>/dev/null | grep -q '^ *Esc to cancel'; then
+      seen=1
+    elif ((seen)); then
+      for _ in 1 2; do  # give the transcript a moment to catch up
+        sleep 0.4
+        tail -c +$((size + 1)) "$2" 2>/dev/null | grep -q 'STOP what you are doing and wait for the user' && return
+      done
+      cur=waiting waiter=$1
+      mark working
+      return
+    elif ((i >= 10)); then
+      return
+    fi
+  done
+}
+
 # Claude Code's events. Its JSON gives the event name and the agent id (set inside subagents)
 # before the tool's input, and only that part is read: no JSON parser needed (quotes inside
 # strings are escaped), and a key inside a tool's input can't be taken for them.
 hook() {
-  local json event='' agent=main
+  local json event='' agent=main transcript=''
   json=$(head -c 8192)
   cat >/dev/null
   json=${json%%\"tool_input\"*}
   [[ $json =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"([A-Za-z]+)\" ]] && event=${BASH_REMATCH[1]}
   [[ $json =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && agent=${BASH_REMATCH[1]}
+  [[ $json =~ \"transcript_path\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] && transcript=${BASH_REMATCH[1]}
   case $event in
     UserPromptSubmit) mark working ;;
-    # A permission dialog or a question is open (in auto mode: only when it does ask you).
-    PermissionRequest) mark waiting "$agent" ;;
+    # A permission dialog or a question is open (in auto mode: only when it does ask you). The
+    # watch runs on its own (its output closed, so Claude Code doesn't wait for it).
+    PermissionRequest)
+      mark waiting "$agent"
+      if command -v setsid >/dev/null; then setsid -f "$0" watch "$agent" "$transcript" </dev/null >/dev/null 2>&1
+      else "$0" watch "$agent" "$transcript" </dev/null >/dev/null 2>&1 & fi ;;
     # A tool finished: back to work, unless another agent (a subagent, say) is waiting on you.
     PostToolUse | PostToolUseFailure)
       if [ "$cur" != waiting ] || [ -z "$waiter" ] || [ "$waiter" = "$agent" ]; then mark working; fi ;;
@@ -59,6 +92,7 @@ case ${1:-} in
   working | waiting | done) mark "$1" ;;
   clear) clear_mark ;;
   hook) hook ;;
+  watch) watch "${2:-main}" "${3:-}" ;;  # started by hook
   *) echo "usage: hub-state working|waiting|done|clear, or hub-state hook (see integrations/)" >&2; exit 2 ;;
 esac
 exit 0

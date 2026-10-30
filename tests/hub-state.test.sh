@@ -54,6 +54,37 @@ check "a 3 MB event" waiting/main
 printf '{"something":"else"}' | bin/hub-state hook
 check "an event it doesn't know changes nothing" waiting/main
 
+# The watch: a permission dialog that closes means you answered it.
+bin/hub-state clear
+sleep 0.6  # the watches started above see the change and stop
+TR=",\"transcript_path\":\"$dir/t.jsonl\""
+: >"$dir/t.jsonl"
+dialog() { tmux send-keys -t t "clear; printf ' Do you want to proceed?\n 1. Yes\n\n Esc to cancel - Tab to amend\n'" Enter; sleep 0.5; }
+answer() { tmux send-keys -t t clear Enter; }
+# wait_for STATE/WAITER: true once the mark is that (up to 4 s)
+wait_for() { local i; for ((i = 0; i < 40; i++)); do [[ "$(opt @hub-state)/$(opt @hub-wait)" == "$1" ]] && return 0; sleep 0.1; done; return 1; }
+# reject HOW: the line Claude Code adds to the transcript when you say no
+reject() { printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"The user doesn'\''t want to proceed with this tool use. %s"}]}}\n' "$1" >>"$dir/t.jsonl"; }
+STOP='STOP what you are doing and wait for the user to tell you how to proceed.'
+reject "$STOP"  # an earlier no, which mustn't count
+dialog
+ev PermissionRequest '' "$TR$T"
+sleep 1.5;                        check "while the dialog is open: waiting" waiting/main
+answer
+if wait_for working/; then pass "answering it: working at once"; else fail "answering it: still $(opt @hub-state)/$(opt @hub-wait)"; fi
+dialog
+ev PermissionRequest '' "$TR$T"
+sleep 1
+reject "$STOP"
+answer
+sleep 2.5;                        check "saying no: Claude waits for you, so still waiting" waiting/main
+dialog
+ev PermissionRequest '' "$TR$T"
+sleep 1
+reject 'To tell you how to proceed, the user said: use ls'
+answer
+if wait_for working/; then pass "saying no and what to do instead: working"; else fail "no with a reason: still $(opt @hub-state)/$(opt @hub-wait)"; fi
+
 if env -u TMUX -u TMUX_PANE bin/hub-state hook <<<'{}'; then pass "outside tmux: does nothing"; else fail "outside tmux: failed"; fi
 bin/hub-state bogus 2>/dev/null
 if [[ $? == 2 ]]; then pass "a bad argument: usage, exit 2"; else fail "a bad argument: wrong exit code"; fi
