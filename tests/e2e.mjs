@@ -191,7 +191,6 @@ try {
   const bell = page.locator('.side-foot button[aria-pressed]');
   await bell.click();
   check('the bell turns notifications on', await until(async () => (await bell.getAttribute('aria-pressed')) === 'true'));
-  check('... and shows a sample, so you see they arrive', await until(async () => (await notes()).some(n => n.startsWith('Notifications are on'))), (await notes()).join(' | '));
   tmux('laptop', 'set-option', '-t', 'beta', '@hub-state', 'waiting');
   // No polling here: the event stream brings the change (the page's safety poll is every 30 s).
   check('a session that needs you gets a dot, pushed to the page', await until(() => row(page, 'beta').locator('.st-waiting').isVisible(), 6000));

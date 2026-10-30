@@ -277,8 +277,8 @@ restarts ttyd, and open pages reconnect.
 - **Swiping doesn't scroll:** turn on tmux mouse mode (the hub's tmux settings do).
 - **"Notifications are blocked":** the browser was told no once; allow notifications in the
   site's settings (the lock or tune icon next to the address), then turn the bell on again.
-- **No notifications, though they're allowed:** turning the bell on shows a sample. If even that
-  doesn't appear, the system hides the browser's notifications: on Windows, check Settings →
+- **No notifications, though they're allowed:** the system may hide the browser's notifications.
+  On Windows, check Settings →
   System → Notifications (the switch at the top, which covers every app, then your browser), and
   Do not disturb. A browser that forgets the
   permission when it closes (Edge: "Choose what to clear every time you close the browser", Site
