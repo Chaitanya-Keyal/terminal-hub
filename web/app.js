@@ -125,7 +125,7 @@ ui.side.append(
     iconBtn('a-arrow-down', 'Smaller text', () => setFont(S.fontSize - 1)),
     iconBtn('a-arrow-up', 'Larger text', () => setFont(S.fontSize + 1)),
     h('span', { class: 'grow' }),
-    iconBtn('keyboard', 'Keyboard shortcuts', toggleHelp)),
+    iconBtn('keyboard', 'Keyboard shortcuts', toggleHelp, 'help-toggle')),
 );
 ui.rail.append(iconBtn('panel-left', 'Show the list', () => setSidebar(true)));
 ui.home.append(
@@ -525,7 +525,7 @@ function setFont(px) {
 function setSidebar(on) {
   S.sidebar = on;
   store.set('sidebar', on);
-  help?.remove(); help = null;
+  closeHelp();
   render();
 }
 
@@ -537,7 +537,7 @@ const tmuxKeys = name => {
 };
 
 function toggleHelp() {
-  if (help) { help.remove(); help = null; return; }
+  if (help) return closeHelp();
   const line = (what, ...keys) => h('div', { class: 'help-line' }, h('span', {}, what), h('span', { class: 'help-keys' }, ...keys));
   const arrow = (dir, label) => h('kbd', { 'aria-label': label }, icon(`arrow-${dir}`));
   const plus = what => h('span', { class: 'muted' }, what);
@@ -568,11 +568,16 @@ function toggleHelp() {
     h('div', { class: 'help-note' }, 'With mouse mode on, you can also click a pane, scroll, drag pane borders, and right-click for a menu.'));
   help = box;
   ui.side.append(box);
-  setTimeout(() => document.addEventListener('pointerdown', function off(e) {
-    if (help && !help.contains(e.target)) { help.remove(); help = null; }
+  // A press anywhere else closes it (the click that opened it is over by now). The button is left
+  // to toggle it: closing here would let its click open it again.
+  document.addEventListener('pointerdown', function off(e) {
+    const t = /** @type {Element} */ (e.target);
+    if (help && !help.contains(t) && !t.closest?.('.help-toggle')) closeHelp();
     if (!help) document.removeEventListener('pointerdown', off, true);
-  }, true));
+  }, true);
 }
+
+function closeHelp() { help?.remove(); help = null; }
 
 function openSettings() {
   const value = h('span', { class: 'value' }, String(S.fontSize));
@@ -619,6 +624,7 @@ function toast(text, ms = 1800) {
 
 // ---- keyboard, history, layout changes ---------------------------------------------------
 addEventListener('keydown', e => {
+  if (e.key === 'Escape' && help) { e.preventDefault(); e.stopPropagation(); return closeHelp(); }
   if (!wide() || !e.altKey || e.ctrlKey || e.metaKey) return;
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     const list = allTargets();

@@ -98,7 +98,12 @@ try {
   await page.locator('.side-foot .icon-btn[title="Keyboard shortcuts"]').click();
   check("the shortcuts list tmux's keys, after the session's prefix",
     await until(async () => (await page.locator('.popover .help-sub').textContent()).replace(/\s/g, '') === 'PressCtrlbthen:'));
-  await page.mouse.click(900, 400);
+  const helpButton = page.locator('.side-foot .icon-btn[title="Keyboard shortcuts"]');
+  await helpButton.click();
+  check('the shortcuts button closes the box again', await until(async () => (await page.locator('.popover').count()) === 0, 2000));
+  await helpButton.click();
+  await page.keyboard.press('Escape');
+  check('... and so does Esc', await until(async () => (await page.locator('.popover').count()) === 0, 2000));
 
   tmux('laptop', 'new-session', '-d', '-s', 'my notes');  // tmux allows the space; the hub can't attach to it
   check("a session the hub can't open is dimmed", await until(() => row(page, 'my notes').evaluate(el => el.classList.contains('off'))));
