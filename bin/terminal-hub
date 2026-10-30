@@ -33,7 +33,8 @@ place() {  # place KEY LABEL COLOUR local|ssh|via [ARGS...]: see config.example
 # Listing reuses one ssh connection per place for a minute, so the page can refresh often.
 LIST_SSH=(-o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o "ControlPath=$RUN/ssh-%C"
   -o ControlPersist=60)
-FMT='#{session_name}	#{session_windows}	#{session_attached}	#{@hub-state}	#{@hub-state-at}'
+# The fields that can be empty go last: `read` with a tab IFS merges empty fields in between.
+FMT='#{session_name}	#{session_windows}	#{session_attached}	#{prefix}	#{@hub-state}	#{@hub-state-at}'
 
 # list I: place I's sessions as "name windows attached state state-at" lines (tab-separated).
 # No tmux server means no sessions, not an error, hence the `exit 0`s. Returns 2 when ssh was
@@ -67,13 +68,13 @@ list_all() {
 }
 
 cmd_list() {
-  local i st name win att state at
+  local i st name win att prefix state at
   list_all
   for i in "${!KEY[@]}"; do
     case $(<"$TMPD/$i.rc") in 0) st=ok ;; 2) st=locked ;; *) st=unreachable ;; esac
     printf 'place\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "${LABEL[i]}" "${COLOUR[i]}" "$st"
-    while IFS=$'\t' read -r name win att state at; do
-      [[ -n $name ]] && printf 'session\t%s\t%s\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "$name" "$win" "$att" "$state" "$at"
+    while IFS=$'\t' read -r name win att prefix state at; do
+      [[ -n $name ]] && printf 'session\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "$name" "$win" "$att" "$state" "$at" "$prefix"
     done <"$TMPD/$i"
   done
   rm -rf "$TMPD"

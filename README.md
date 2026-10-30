@@ -112,14 +112,19 @@ answer within 4 seconds, say the same hub on an always-on server.
 ## Using it
 
 **Desktop.** Click a session to open it. Shift+click, or the split button that appears on hover,
-opens it beside the others. The keyboard button at the bottom of the sidebar lists the shortcuts:
+opens it in a new pane beside the others. The keyboard button at the bottom of the sidebar lists
+the shortcuts, and common tmux keys after the open session's tmux prefix:
 
 | | |
 | --- | --- |
 | Alt+↑, Alt+↓ | previous, next session |
 | Alt+\` | the last session |
-| Shift+click | open beside |
-| Shift+drag | select text even when the app uses the mouse (selections are copied) |
+| Shift+click | open in a new pane |
+| Shift+drag | select text to copy |
+| Shift+right-click | the browser's menu |
+
+With tmux's mouse mode on, tmux gets plain drags and right-clicks (its own menu); Shift hands them
+to the page instead. On a Mac, use ⌥ rather than Shift.
 
 **Phone.** Tap a session to open it, and use the back button (or the browser's) to return to the
 list. The top bar's swap button jumps to the last session. ctrl on the key bar applies to the next

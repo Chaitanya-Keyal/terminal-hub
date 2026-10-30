@@ -3,7 +3,7 @@
 // Every terminal is its own connection to ttyd (term.js); the last few hidden ones stay
 // connected, so switching back is instant. The list comes from /assets/sessions.json.
 import { icon } from './icons.js';
-import { TermView } from './term.js';
+import { TermView, MAC } from './term.js';
 import { keyBar } from './keys.js';
 
 const WIDE = matchMedia('(min-width: 900px)');
@@ -15,7 +15,7 @@ const NAME_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const APP = document.title;
 const STATUS = { working: 'Working', waiting: 'Needs you', done: 'Done' };
 
-/** @typedef {{name: string, windows: number, attached: number, status: '' | 'working' | 'waiting' | 'done', statusAt: number}} Session */
+/** @typedef {{name: string, windows: number, attached: number, status: '' | 'working' | 'waiting' | 'done', statusAt: number, prefix?: string, starting?: boolean}} Session */
 /** @typedef {{key: string, label: string, colour: string, state: 'ok' | 'locked' | 'unreachable', sessions: Session[]}} Place */
 
 const store = {
@@ -161,7 +161,7 @@ function placeItems() {
 function placeHead(p) {
   const tail =
     p.state === 'locked' ? h('button', { type: 'button', class: 'chip', onclick: () => unlock(p) }, icon('lock'), 'Unlock')
-    : p.state === 'unreachable' ? h('button', { type: 'button', class: 'chip quiet', title: 'Try again', onclick: () => load() }, icon('rotate-cw'), 'Unreachable')
+    : p.state === 'unreachable' ? h('button', { type: 'button', class: 'chip quiet', title: 'Try again', onclick: () => load(true) }, icon('rotate-cw'), 'Unreachable')
     : iconBtn('plus', `New session on ${p.label}`, () => startCreate(p.key), 'add');
   return h('div', { class: 'place-head' }, h('span', { class: 'dot' }), h('span', { class: 'place-name' }, p.label), tail);
 }
@@ -177,10 +177,12 @@ function sessionRow(p, s) {
   const open = visible().includes(t);
   const ok = openable(t);
   const main = h('button', {
-    type: 'button', class: 'row-main', title: !ok ? 'Rename this session to open it here' : st ? STATUS[st] : null,
+    type: 'button', class: 'row-main',
+    title: !ok ? 'Rename this session to open it here' : s.starting ? 'Starting…' : st ? STATUS[st] : null,
     onclick: e => (wide() && (e.shiftKey || e.metaKey || e.ctrlKey) ? openBeside(t) : openSession(t)),
   },
-  h('span', { class: `st${st ? ' st-' + st : ''}`, 'aria-label': st ? STATUS[st] : null }),
+  s.starting ? h('span', { class: 'st st-starting', 'aria-label': 'Starting' }, icon('loader-circle'))
+    : h('span', { class: `st${st ? ' st-' + st : ''}`, 'aria-label': st ? STATUS[st] : null }),
   h('span', { class: 'row-name' }, s.name),
   !wide() && open ? h('span', { class: 'row-meta' }, 'open')
     : s.windows > 1 && h('span', { class: 'row-meta' }, `${s.windows} windows`));
@@ -254,6 +256,7 @@ function openSession(t) {
   if (!openable(t)) return cantOpen(t);
   S.creating = createEl = null;
   S.trusted.add(t);
+  markStarting(t);
   if (wide()) {
     const i = S.panes.indexOf(t);
     if (i >= 0) S.focus = i;
@@ -272,6 +275,7 @@ function openSession(t) {
 function openBeside(t) {
   if (!openable(t)) return cantOpen(t);
   S.trusted.add(t);
+  markStarting(t);
   const i = S.panes.indexOf(t);
   if (i >= 0) S.focus = i;
   else if (S.panes.length < MAX_PANES) { S.panes.push(t); S.focus = S.panes.length - 1; }
@@ -337,14 +341,15 @@ function viewFor(t) {
       ctrl: () => S.ctrl, ctrlUsed: () => { S.ctrl = false; bar.setCtrl(false); },
       copied: () => toast('Copied'),
       status: view => {
-        if (view.status === 'ended') {
-          toast(`${nameOf(t)} ended`);
-          setTimeout(() => closeTarget(t));
-          setTimeout(load, 300);
-        } else if (view.status === 'open') {
-          setTimeout(load, 500);
-        }
+        if (view.status !== 'ended') return;
+        toast(`${nameOf(t)} ended`);
+        const p = placeOf(t);
+        if (p) p.sessions = p.sessions.filter(s => s.name !== nameOf(t));
+        starting.delete(t);
+        setTimeout(() => closeTarget(t));
+        load(true);
       },
+      attached: () => load(true),
       actions: view => view.status === 'detached'
         ? [['Reattach', () => view.connect(), true], ['Close', () => closeTarget(t)]] : null,
     }, ['--existing', t]);
@@ -448,23 +453,50 @@ function render() {
 }
 
 // ---- the list from the server --------------------------------------------------------------
-let loading = null;
-function load() {
-  return (loading ??= (async () => {
+// load(true) asks the server to list again rather than share its last list (up to 2 s old), for
+// when you just did something: a fresh request made while another is on the way follows it.
+let loading = null, again = false;
+function load(fresh = false) {
+  if (loading) { again ||= fresh; return loading; }
+  return (loading = (async () => {
     try {
-      const r = await fetch(`/assets/sessions.json${S.ready ? '' : '?fresh'}`, { cache: 'no-store' });
-      if (r.ok) S.places = (await r.json()).places;
+      const r = await fetch(`/assets/sessions.json${fresh || !S.ready ? '?fresh' : ''}`, { cache: 'no-store' });
+      if (r.ok) S.places = withStarting((await r.json()).places);
     } catch { /* keep the last list */ }
     loading = null;
     if (!S.ready && S.places) firstList();
     render();
+    if (again) { again = false; load(true); }
   })());
+}
+
+// Sessions you just created show up at once, with a spinner, until the list has them: the place
+// takes a moment (an ssh hop) to create one. After 20 s without it, creating must have failed.
+const starting = new Map();  // target → when
+function markStarting(t) {
+  if (!S.ready || exists(t) || placeOf(t)?.state !== 'ok') return;
+  starting.set(t, Date.now());
+  S.places = withStarting(S.places);
+}
+/** @param {Place[] | null} places */
+function withStarting(places) {
+  for (const [t, at] of starting) {
+    const p = places?.find(x => x.key === keyOf(t)), name = nameOf(t);
+    const listed = p?.sessions.find(s => s.name === name);
+    if (!p || p.state !== 'ok' || (listed && !listed.starting) || Date.now() - at > 20000) { starting.delete(t); continue; }
+    if (!listed) {
+      const i = p.sessions.findIndex(s => s.name > name);  // tmux lists sessions by name
+      p.sessions.splice(i < 0 ? p.sessions.length : i, 0, { name, windows: 1, attached: 1, status: '', statusAt: 0, starting: true });
+    }
+  }
+  return places;
 }
 
 // After the first list: drop restored panes whose sessions are gone (connecting to them would
 // recreate them as empty shells), and open what the address asked for.
 function firstList() {
   S.ready = true;
+  for (const t of S.trusted) markStarting(t);  // a link that creates a session
   const keep = t => S.trusted.has(t) || exists(t) || placeOf(t)?.state !== 'ok';
   S.panes = S.panes.filter(keep);
   S.focus = Math.max(0, Math.min(S.focus, S.panes.length - 1));
@@ -497,15 +529,43 @@ function setSidebar(on) {
   render();
 }
 
+// A tmux key name (C-b, M-a, C-Space) as the keys to press.
+const tmuxKeys = name => {
+  const parts = name.split('-');
+  const key = parts.pop() || '-';
+  return [...parts.map(m => ({ C: 'Ctrl', M: 'Alt', S: 'Shift' })[m] ?? m), key];
+};
+
 function toggleHelp() {
   if (help) { help.remove(); help = null; return; }
   const line = (what, ...keys) => h('div', { class: 'help-line' }, h('span', {}, what), h('span', { class: 'help-keys' }, ...keys));
+  const arrow = (dir, label) => h('kbd', { 'aria-label': label }, icon(`arrow-${dir}`));
+  const plus = what => h('span', { class: 'muted' }, what);
+  const prefix = sessionOf(focused() ?? '')?.prefix || S.places?.flatMap(p => p.sessions).find(s => s.prefix)?.prefix || 'C-b';
   const box = h('div', { class: 'popover', role: 'dialog', 'aria-label': 'Keyboard shortcuts' },
     h('b', {}, 'Shortcuts'),
-    line('Switch session', kbd('Alt'), h('kbd', { 'aria-label': 'Up arrow' }, icon('arrow-up')), h('kbd', { 'aria-label': 'Down arrow' }, icon('arrow-down'))),
+    line('Switch session', kbd('Alt'), arrow('up', 'Up arrow'), arrow('down', 'Down arrow')),
     line('Last session', kbd('Alt'), kbd('`')),
-    line('Open beside', kbd('Shift'), h('span', { class: 'muted' }, '+ click')),
-    line('Copy', kbd('Shift'), h('span', { class: 'muted' }, '+ drag')));
+    line('Open in a new pane', kbd('Shift'), plus('+ click')),
+    // tmux's mouse mode takes plain drags and right-clicks; this key gives them to the page.
+    line('Select text to copy', kbd(MAC ? '⌥' : 'Shift'), plus('+ drag')),
+    line('Browser menu', kbd(MAC ? '⌥' : 'Shift'), plus('+ right-click')),
+    h('b', { class: 'help-head' }, 'tmux'),
+    h('div', { class: 'help-sub' }, 'Press', ...tmuxKeys(prefix).map(k => kbd(k)), 'then:'),
+    line('Detach', kbd('d')),
+    line('New window', kbd('c')),
+    line('Next, previous window', kbd('n'), kbd('p')),
+    line('Window by number', kbd('0'), plus('…'), kbd('9')),
+    line('Split side by side', kbd('%')),
+    line('Split stacked', kbd('"')),
+    line('Switch pane', arrow('left', 'Left arrow'), arrow('right', 'Right arrow'), arrow('up', 'Up arrow'), arrow('down', 'Down arrow')),
+    line('Zoom a pane in or out', kbd('z')),
+    line('Close a pane', kbd('x')),
+    line('Scroll back (q stops)', kbd('[')),
+    line('Rename window', kbd(',')),
+    line('Rename session', kbd('$')),
+    line('Every tmux key', kbd('?')),
+    h('div', { class: 'help-note' }, 'With mouse mode on, you can also click a pane, scroll, drag pane borders, and right-click for a menu.'));
   help = box;
   ui.side.append(box);
   setTimeout(() => document.addEventListener('pointerdown', function off(e) {
@@ -534,7 +594,7 @@ function unlock(p) {
   const view = new TermView(['--unlock', p.key], {
     fontSize: S.fontSize, renderer: store.get('renderer', 'webgl'),
     ctrl: () => false, ctrlUsed() {}, copied() {},
-    status: v => { if (v.status === 'unlocked') { close(); toast(`${p.label} unlocked`); load(); } },
+    status: v => { if (v.status === 'unlocked') { close(); toast(`${p.label} unlocked`); load(true); } },
     actions: v => (v.status === 'failed' ? [['Try again', () => v.connect(), true], ['Close', () => close()]] : null),
   });
   const el = h('div', { class: 'modal', onclick: e => { if (e.target === el) close(); } },
@@ -592,7 +652,7 @@ WIDE.addEventListener('change', () => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
-  load();
+  load(true);
   for (const v of views.values()) v.reconnectNow();
 });
 

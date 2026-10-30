@@ -25,6 +25,8 @@ const THEME = {
   brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#ffffff',
 };
 const CTRL_SYMS = { '@': 0, ' ': 0, '[': 27, '\\': 28, ']': 29, '^': 30, '_': 31, '?': 127 };
+// Where the key that takes the mouse back from the app (to select text) is ⌥ rather than Shift.
+export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
 let tokenPromise = null;
 const authToken = () => (tokenPromise ??= fetch('/token').then(r => r.json()).then(j => j.token || '').catch(() => ''));
@@ -38,7 +40,8 @@ export function ctrlOf(d) {
 export class TermView {
   // args: the command's arguments, e.g. ['laptop:notes'] or ['--unlock', 'server'];
   // again: the arguments for reconnecting (default: args), e.g. ['--existing', 'laptop:notes'].
-  // hooks: {fontSize, renderer, ctrl() → bool, ctrlUsed(), status(view), copied(), actions(view) → [[label, fn]]}
+  // hooks: {fontSize, renderer, ctrl() → bool, ctrlUsed(), status(view), copied(),
+  //   actions(view) → [[label, fn]], attached(view): a connection's first output (the session exists)}
   constructor(args, hooks, again = args) {
     this.args = args;
     this.again = again;
@@ -60,7 +63,8 @@ export class TermView {
     const t = (this.term = new Terminal({
       fontFamily: '"FiraCode NF", ui-monospace, Menlo, Consolas, monospace',
       fontSize: hooks.fontSize, lineHeight: 1.1, theme: THEME, cursorBlink: true,
-      allowProposedApi: true, macOptionIsMeta: true, scrollback: 2000, drawBoldTextInBrightColors: false,
+      allowProposedApi: true, macOptionIsMeta: true, macOptionClickForcesSelection: true,
+      scrollback: 2000, drawBoldTextInBrightColors: false,
     }));
     this.fit = new FitAddon();
     t.loadAddon(this.fit);
@@ -77,6 +81,11 @@ export class TermView {
     t.onSelectionChange(() => {
       const s = t.getSelection();
       if (s && navigator.clipboard) navigator.clipboard.writeText(s).then(() => this.hooks.copied(), () => {});
+    });
+    // When the app uses the mouse (tmux's mouse mode), right-click is its too: tmux has a menu.
+    // The key that selects text past the app (Shift; ⌥ on a Mac) brings the browser's menu back.
+    this.el.addEventListener('contextmenu', e => {
+      if (t.modes.mouseTrackingMode !== 'none' && !(MAC ? e.altKey : e.shiftKey)) e.preventDefault();
     });
     new ResizeObserver(() => this.refit()).observe(this.el);
   }
@@ -121,11 +130,14 @@ export class TermView {
       ws.send(enc.encode(JSON.stringify({ AuthToken: token, columns: this.term.cols, rows: this.term.rows })));
       this.retries = 0;
       this.written = this.pending = 0;
+      this.quiet = true;
       this.setStatus('open');
     };
     ws.onmessage = e => {
       const d = new Uint8Array(e.data);
-      if (d[0] === 48) this.write(d.subarray(1));  // "0": output; title and preferences are ignored
+      if (d[0] !== 48) return;  // "0": output; title and preferences are ignored
+      this.write(d.subarray(1));
+      if (this.quiet) { this.quiet = false; this.hooks.attached?.(this); }
     };
     ws.onclose = () => this.closed();
     this.ws = ws;

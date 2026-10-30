@@ -112,6 +112,10 @@ kbd .icon { width: 12px; height: 12px; }
 .st-working { background: var(--working); animation: pulse 1.6s ease-in-out infinite; }
 .st-waiting { background: var(--waiting); box-shadow: 0 0 0 3px rgba(227, 179, 65, .2); }
 .st-done { background: var(--done); }
+/* A session being created: a spinner the size of the dots' column, so names don't shift. */
+.st-starting { position: relative; }
+.st-starting .icon { position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px;
+  color: var(--muted); animation: spin 1s linear infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 
 .create { margin: 2px 6px 6px; }
@@ -150,11 +154,15 @@ kbd .icon { width: 12px; height: 12px; }
 }
 .popover {
   position: absolute; left: 8px; right: 8px; bottom: 46px; z-index: 30; display: grid; gap: 9px;
+  max-height: calc(100% - 64px); overflow-y: auto;
   padding: 12px; background: var(--raise); border: 1px solid var(--line-2); border-radius: 10px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, .55);
 }
 .help-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-2); font-size: 12.5px; }
 .help-keys { display: flex; align-items: center; gap: 4px; flex: none; }
+.help-head { margin-top: 6px; }
+.help-sub { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+.help-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
 
 #empty { flex: 1; place-items: center; padding: 24px; }
 .empty-box { display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 380px; text-align: center; }

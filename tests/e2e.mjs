@@ -16,7 +16,10 @@ const check = (name, ok, info = '') => {
 };
 
 const hub = await startHub({
-  places: [{ key: 'laptop', label: 'laptop', colour: '#7ee787' }, { key: 'server', label: 'server', colour: '#ff7b72' }],
+  places: [
+    { key: 'laptop', label: 'laptop', colour: '#7ee787' },
+    { key: 'server', label: 'server', colour: '#ff7b72', tmuxConf: 'set -g status off\nset -g mouse on\n' },
+  ],
   extraConfig: [`place broken broken '#8b949e' ssh hub-e2e.invalid`],
 });
 const { base: BASE, tmux } = hub;
@@ -42,6 +45,12 @@ check("a terminal connection from the hub's own page is accepted", (await upgrad
 const browser = await launch();
 const context = options => hub.context(browser, options);
 const names = page => page.locator('#sidebar .row-name').allTextContents();
+// Right-click in the focused terminal: true if the page kept the browser's menu away.
+const menuBlocked = (page, shiftKey = false) => page.locator('.pane.focused .xterm').evaluate((el, shiftKey) => {
+  const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, shiftKey });
+  el.dispatchEvent(e);
+  return e.defaultPrevented;
+}, shiftKey);
 const row = (page, name, scope = '#sidebar') => page.locator(`${scope} .row`).filter({ has: page.locator('.row-name', { hasText: new RegExp(`^${name}$`) }) });
 
 try {
@@ -65,9 +74,12 @@ try {
 
   await row(page, 'gamma').locator('.row-main').click();
   check('switch to another place', await until(() => clients('server').includes('gamma')), clients('server').join());
+  check("right-click goes to tmux when it uses the mouse (tmux's menu)", await until(() => menuBlocked(page)));
+  check("... and shift+right-click to the browser's menu", !(await menuBlocked(page, true)));
   check('the previous session stays connected in the background', clients('laptop').includes('alpha'));
   await row(page, 'alpha').locator('.row-main').click();
   check('switching back reuses the connection', await until(() => row(page, 'alpha').evaluate(el => el.classList.contains('focused'))) && clients('laptop').filter(s => s === 'alpha').length === 1);
+  check("right-click is the browser's when tmux doesn't use the mouse", !(await menuBlocked(page)));
 
   await row(page, 'beta').locator('.row-main').click({ modifiers: ['Shift'] });
   check('shift+click opens a second pane', await until(async () => (await page.locator('#panes .pane').count()) === 2 && clients('laptop').includes('beta')));
@@ -83,6 +95,10 @@ try {
   check('alt+down goes to the next session', await until(() => row(page, 'beta').evaluate(el => el.classList.contains('focused'))));
   await page.keyboard.press('Alt+Backquote');
   check('alt+` goes back to the last one', await until(() => row(page, 'alpha').evaluate(el => el.classList.contains('focused'))));
+  await page.locator('.side-foot .icon-btn[title="Keyboard shortcuts"]').click();
+  check("the shortcuts list tmux's keys, after the session's prefix",
+    await until(async () => (await page.locator('.popover .help-sub').textContent()).replace(/\s/g, '') === 'PressCtrlbthen:'));
+  await page.mouse.click(900, 400);
 
   tmux('laptop', 'new-session', '-d', '-s', 'my notes');  // tmux allows the space; the hub can't attach to it
   check("a session the hub can't open is dimmed", await until(() => row(page, 'my notes').evaluate(el => el.classList.contains('off'))));
@@ -94,6 +110,7 @@ try {
   await page.locator('#sidebar .place', { hasText: 'server' }).locator('.icon-btn.add').click();
   check('"+" opens a name field, focused', await until(() => page.locator('.create-input').evaluate(el => el === document.activeElement)));
   await page.keyboard.type('work\n');
+  check('a new session is listed at once', await until(async () => (await names(page)).includes('work'), 300));
   check('a named session is created and opened', await until(() => clients('server').includes('work')), sessions('server').join());
   await sleep(400);
   await page.keyboard.type('echo typed-$((6*7))\n');

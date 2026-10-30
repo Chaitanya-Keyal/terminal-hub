@@ -18,7 +18,7 @@ def _int(s):
 
 def sessions(fresh=False):
     """{"places": [{"key", "label", "colour", "state", "sessions": [
-        {"name", "windows", "attached", "status", "statusAt"}]}]}
+        {"name", "windows", "attached", "status", "statusAt", "prefix"}]}]}
     fresh: list again unless the cached list is under a quarter of a second old."""
     global _cache
     with _lock:
@@ -34,10 +34,11 @@ def sessions(fresh=False):
             f = line.split("\t")
             if f[0] == "place" and len(f) == 5:
                 places.append({"key": f[1], "label": f[2], "colour": f[3], "state": f[4], "sessions": []})
-            elif f[0] == "session" and len(f) == 7 and places:
+            elif f[0] == "session" and len(f) >= 7 and places:
                 places[-1]["sessions"].append({
                     "name": f[2], "windows": _int(f[3]), "attached": _int(f[4]),
                     "status": f[5] if f[5] in ("working", "waiting", "done") else "", "statusAt": _int(f[6]),
+                    "prefix": f[7][:16] if len(f) > 7 else "",  # the session's tmux prefix key, e.g. C-b
                 })
         body = json.dumps({"places": places}).encode()
         _cache = (time.monotonic(), body)
