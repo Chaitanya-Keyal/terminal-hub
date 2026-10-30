@@ -16,8 +16,12 @@ server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xte
 ## What you get
 
 - **One list across machines.** Each *place* in the config is tmux somewhere: here, on another
-  machine over ssh, or as another user. A place that can't be reached says so, and one whose ssh
-  key is locked offers to unlock it.
+  machine over ssh, or as another user, with its own colour and icon. A place that can't be
+  reached says so, one whose ssh key is locked offers to unlock it, and a slow one never holds up
+  the rest.
+- **Categories** group sessions above the places, say one per project, even across machines.
+  Rules in the config sort sessions by folder or name, and the ⋯ menu moves any session.
+  Every group collapses, and a collapsed one still shows if a session in it needs you.
 - **Desktop:** a sidebar and up to four sessions side by side. Recent sessions stay connected in
   the background, so switching is instant, and a reload brings your layout back.
 - **Phone:** a home screen with every session, then one session at a time with a top bar and a
@@ -46,8 +50,10 @@ server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xte
 
 Everything runs on one machine, the hub. Each session you open in the page is its own
 connection to ttyd, which runs `terminal-hub KEY:NAME` to attach to that tmux session: directly,
-over ssh, or through sudo. The list comes from `terminal-hub --list`, which asks every place for
-its sessions at once. When a session closes, `terminal-hub` tells the page why (you detached,
+over ssh, or through sudo. The list comes from `terminal-hub --list KEY`, which `server.py` runs
+for each place on its own and keeps answering with the latest lists, so a slow place doesn't
+delay the others; ssh connections are reused for a minute. The page's files have versioned URLs,
+so browsers keep them, and they load in parallel. When a session closes, `terminal-hub` tells the page why (you detached,
 the session ended, or the connection dropped), so the page can offer to reattach. Renaming and
 killing a session run `terminal-hub --rename` and `--kill` through ttyd the same way.
 
@@ -107,6 +113,29 @@ Changes to places apply at once. The first place is "here", where links without 
   shows **Unlock**, which asks for the passphrase once.
 - Session names are 1 to 32 letters, digits, `-` and `_`.
 
+### Icons and categories
+
+```bash
+icon laptop laptop                          # a place's icon, shown in its colour
+icon bot    🤖                               # or an emoji
+category work  Work  briefcase '*/work/*'   # sessions started in a work folder
+category ops   Ops   rocket    'srv:*' 'deploy*'
+```
+
+A session goes into the first category with a matching pattern: one with a `/` matches the
+folder the session started in, one with a `:` matches `PLACE:NAME`, and any other matches the
+session's name (`*` and `?` work as in the shell). The ⋯ menu's **Move to category** overrides
+the rules for that session, **No category** included; it's kept in the session's tmux option
+`@hub-category`. Categories with no sessions don't show.
+
+Icons can be an emoji, or one of these [Lucide](https://lucide.dev/icons) names: bitcoin,
+book-open, bot, box, brain, briefcase, bug, building-2, chart-line, cloud, code, coffee,
+container, cpu, database, flame, flask-conical, folder, folder-git-2, gamepad-2, gem,
+git-branch, globe, graduation-cap, hammer, hard-drive, heart, house, key-round, laptop, layers,
+leaf, mail, monitor, moon, mountain, music, package, palette, puzzle, rocket, router, server,
+shield, smartphone, sparkles, star, sun, target, terminal, user, users, wallet, wrench, zap.
+More can be added to `tools/vendor.sh`.
+
 The app settings (`HUB_NAME` and friends) are built into the page, so run `./install.sh` after
 changing them. `HUB_FALLBACK` makes the installed app open another URL when this machine doesn't
 answer within 4 seconds, say the same hub on an always-on server.
@@ -115,7 +144,7 @@ answer within 4 seconds, say the same hub on an always-on server.
 
 **Desktop.** Click a session to open it. Shift+click, or the split button that appears on hover,
 opens it in a new pane beside the others. The ⋯ button next to it, or a right-click on it, renames
-or kills it. The keyboard button at the bottom of the sidebar lists
+it, moves it to another category, or kills it. Click a group's name to collapse it. The keyboard button at the bottom of the sidebar lists
 the shortcuts, and common tmux keys after the open session's tmux prefix:
 
 | | |
@@ -130,7 +159,7 @@ With tmux's mouse mode on, tmux gets plain drags and right-clicks (its own menu)
 to the page instead. On a Mac, use ⌥ rather than Shift.
 
 **Phone.** Tap a session to open it, and use the back button (or the browser's) to return to the
-list. The ⋯ on each session, and the one in the top bar, rename or kill it. The top bar's swap button jumps to the last session. ctrl on the key bar applies to the next
+list. The ⋯ on each session, and the one in the top bar, rename, move or kill it. The top bar's swap button jumps to the last session. ctrl on the key bar applies to the next
 key; arrows repeat while held. The gear on the home screen sets the text size.
 
 **Links.** `/?arg=KEY:NAME` opens session NAME on place KEY, creating it if it doesn't exist.
@@ -214,6 +243,8 @@ restarts ttyd, and open pages reconnect.
   hub's user; it has to work without a password prompt.
 - **A place says Unlock:** its ssh key has a passphrase and isn't in the agent. Tap Unlock, or run
   `terminal-hub --unlock KEY`.
+- **A place says Checking:** its first list is taking a while (a slow or sleeping machine); the
+  rest of the list doesn't wait for it.
 - **The page loads but the list stays empty:** `/assets` isn't published, or the asset service is
   down: `systemctl --user status terminal-hub-assets`.
 - **Swiping doesn't scroll:** turn on tmux mouse mode (the hub's tmux settings do).

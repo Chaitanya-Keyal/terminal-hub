@@ -17,6 +17,22 @@ place here "$(hostname)" '#7ee787' local
 # place server server '#ff7b72' ssh myserver
 # place bot    bot    '#d2a8ff' ssh myserver sudo -u bot -H
 
+# Icons (optional): a place's mark in the list, in its colour. A Lucide icon name from the
+# README's list (laptop, server, bot, code, ...) or an emoji. Without one, a coloured dot.
+#   icon KEY NAME
+# icon here laptop
+# icon server server
+
+# Categories (optional) group sessions above the places, say one per project. A session goes
+# into the first category with a pattern that matches it, unless you move it from its ⋯ menu:
+#   a pattern with a / matches the folder the session started in    '*/work/*'
+#   one with a : matches PLACE:NAME                                  'server:deploy*'
+#   any other matches the session's name                             'notes'
+# Patterns are globs (* and ?). Categories with no sessions don't show.
+#   category KEY LABEL ICON [PATTERN...]
+# category work Work briefcase '*/work/*'
+# category ops  Ops  rocket    'server:*'
+
 # The installable app.
 HUB_NAME='terminal hub'               # home-screen name and page title
 HUB_SHORT_NAME='hub'                  # label under the icon
