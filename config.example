@@ -1,5 +1,21 @@
-# terminal-hub config: a bash file at ~/.config/terminal-hub/config. The picker reads it each
-# time the hub opens; install.sh reads the app settings, so re-run it after changing those.
+# terminal-hub config: a bash file at ~/.config/terminal-hub/config.
+# Places take effect at once (terminal-hub reads this every time it lists or attaches). The app
+# settings are built into the page by install.sh, so run it again after changing those.
+
+# Places whose tmux sessions are listed, in this order. The first is "here": links without a place
+# (/?arg=NAME, /?arg=new) open there. KEY appears in links (/?arg=KEY:NAME); LABEL and COLOUR are
+# how the place is shown.
+#   place KEY LABEL COLOUR local            tmux on this machine, as you
+#   place KEY LABEL COLOUR ssh HOST [CMD]   tmux on HOST over ssh (key login; HOST can be an alias
+#                                           from ~/.ssh/config). CMD runs tmux there, for example
+#                                           `sudo -u USER -H` for another user's sessions
+#   place KEY LABEL COLOUR via CMD          tmux through CMD, a command that runs a shell command
+#                                           string, for example `sudo -n -u USER bash -c` for
+#                                           another user on this machine
+# KEY: letters, digits, - and _. The words of CMD can't contain spaces.
+place here "$(hostname)" '#7ee787' local
+# place server server '#ff7b72' ssh myserver
+# place bot    bot    '#d2a8ff' ssh myserver sudo -u bot -H
 
 # The installable app.
 HUB_NAME='terminal hub'               # home-screen name and page title
@@ -11,18 +27,3 @@ HUB_DESCRIPTION='Every tmux session in one list'
 # same hub on an always-on server. Empty turns it off.
 HUB_FALLBACK=''
 HUB_FALLBACK_NAME=''                  # shown while switching, e.g. 'the server'
-
-# The picker.
-HUB_PROMPT='hub > '
-HUB_HEADER='tap a session or type to filter'
-
-# Places whose tmux sessions are listed, in this order. The first is "here": /?arg=new and
-# /?arg=NAME open there, and any place opens with /?arg=KEY:NAME. LABEL and COLOUR make its tag.
-#   place KEY LABEL COLOUR local            tmux on this machine, as you
-#   place KEY LABEL COLOUR ssh HOST [CMD]   tmux on HOST over ssh (key login); CMD runs it there,
-#                                           e.g. `sudo -u USER -H` for another user's sessions
-#   place KEY LABEL COLOUR via CMD          tmux through CMD, which runs a shell command string,
-#                                           e.g. `sudo -n -u USER bash -c` for another local user
-# The words of CMD can't contain spaces.
-place here "$(hostname)" '#7ee787' local
-# place server server '#ff7b72' ssh myserver

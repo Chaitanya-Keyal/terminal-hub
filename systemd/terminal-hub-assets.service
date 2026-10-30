@@ -1,10 +1,10 @@
 [Unit]
-Description=terminal-hub: static assets (font, manifest, icons, service worker)
+Description=terminal-hub: the page's files and the session list
 PartOf=terminal-hub.service
 
 [Service]
 # Localhost only; published at /assets next to the hub.
-ExecStart=python3 %h/.local/share/terminal-hub/serve-assets.py 7683 %h/.local/share/terminal-hub/assets
+ExecStart=python3 %h/.local/share/terminal-hub/server.py 7683 %h/.local/share/terminal-hub/assets
 Restart=on-failure
 
 [Install]

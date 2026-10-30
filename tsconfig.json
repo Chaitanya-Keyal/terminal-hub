@@ -1,0 +1,27 @@
+{
+  // Type-checks the page's plain JavaScript (JSDoc types); nothing is compiled or emitted.
+  // Run: npx -p typescript tsc
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    // The page imports xterm.js by package name (the import map in index.html points the browser
+    // at vendor/*.mjs); here the same names point at their type definitions.
+    "paths": {
+      "@xterm/xterm": ["./web/vendor/types/xterm.d.ts"],
+      "@xterm/addon-fit": ["./web/vendor/types/addon-fit.d.ts"],
+      "@xterm/addon-webgl": ["./web/vendor/types/addon-webgl.d.ts"],
+      "@xterm/addon-unicode11": ["./web/vendor/types/addon-unicode11.d.ts"],
+      "@xterm/addon-web-links": ["./web/vendor/types/addon-web-links.d.ts"]
+    }
+  },
+  "include": ["web/*.js", "web/vendor/types/*.d.ts"],
+  "exclude": ["web/sw.js"]  // a template: install.sh fills it in
+}

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# hub-state: mark this tmux session in the terminal hub's list (a coloured dot by its name) as
+# working, waiting (for you) or done.
+#
+#   hub-state working|waiting|done|clear   set the mark (from a script, or another agent's hooks)
+#   hub-state hook                         what Claude Code's hooks run: it reads the hook's event
+#                                          on stdin and picks the mark (integrations/claude-code.json)
+#
+# The mark lives in options on the tmux session (@hub-state, and @hub-state-at for when it was
+# set), which the hub reads when it lists sessions. Outside tmux this does nothing.
+#
+# install.sh copies this to ~/.local/bin; edit the copy in the repo.
+
+if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
+  [ "${1:-}" = hook ] && cat >/dev/null
+  exit 0
+fi
+pane=$TMUX_PANE
+IFS='|' read -r cur waiter < <(tmux display-message -p -t "$pane" '#{@hub-state}|#{@hub-wait}' 2>/dev/null)
+
+# mark STATE [WAITER]: set the mark; its time changes only when the state does. WAITER is the
+# agent a "waiting" belongs to (empty: anyone's tool finishing ends it).
+mark() {
+  [ "$1" = "$cur" ] && [ "${2:-}" = "$waiter" ] && return
+  local cmd=(set-option -q -t "$pane" @hub-wait "${2:-}")
+  [ "$1" = "$cur" ] || cmd+=(\; set-option -q -t "$pane" @hub-state "$1" \; set-option -q -t "$pane" @hub-state-at "$(date +%s)")
+  tmux "${cmd[@]}" 2>/dev/null
+}
+
+clear_mark() {
+  tmux set-option -qu -t "$pane" @hub-state \; set-option -qu -t "$pane" @hub-state-at \; \
+    set-option -qu -t "$pane" @hub-wait 2>/dev/null
+}
+
+# Claude Code's events. Its JSON gives the event name and the agent id (set inside subagents)
+# before the tool's input, and only that part is read: no JSON parser needed (quotes inside
+# strings are escaped), and a key inside a tool's input can't be taken for them.
+hook() {
+  local json event='' agent=main
+  json=$(head -c 8192)
+  cat >/dev/null
+  json=${json%%\"tool_input\"*}
+  [[ $json =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"([A-Za-z]+)\" ]] && event=${BASH_REMATCH[1]}
+  [[ $json =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && agent=${BASH_REMATCH[1]}
+  case $event in
+    UserPromptSubmit) mark working ;;
+    # A permission dialog or a question is open (in auto mode: only when it does ask you).
+    PermissionRequest) mark waiting "$agent" ;;
+    # A tool finished: back to work, unless another agent (a subagent, say) is waiting on you.
+    PostToolUse | PostToolUseFailure)
+      if [ "$cur" != waiting ] || [ -z "$waiter" ] || [ "$waiter" = "$agent" ]; then mark working; fi ;;
+    # The turn is over, or ended on an error. (Nothing fires when you interrupt it with Esc.)
+    Stop | StopFailure) mark "done" ;;
+    SessionEnd) clear_mark ;;
+  esac
+}
+
+case ${1:-} in
+  working | waiting | done) mark "$1" ;;
+  clear) clear_mark ;;
+  hook) hook ;;
+  *) echo "usage: hub-state working|waiting|done|clear, or hub-state hook (see integrations/)" >&2; exit 2 ;;
+esac
+exit 0

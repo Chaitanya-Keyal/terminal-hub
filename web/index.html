@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- terminal hub. install.sh fills in the @PLACEHOLDERS@ and ttyd serves the result at /. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#0e1115">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="@DESCRIPTION@">
+<title>@NAME@</title>
+<link rel="manifest" href="/assets/app.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/app-32.png">
+<link rel="apple-touch-icon" href="/assets/app-192.png">
+<link rel="preload" href="/assets/FiraCodeNF.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/vendor/xterm.css">
+<link rel="stylesheet" href="/assets/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "@xterm/xterm": "/assets/vendor/xterm.mjs",
+    "@xterm/addon-fit": "/assets/vendor/addon-fit.mjs",
+    "@xterm/addon-webgl": "/assets/vendor/addon-webgl.mjs",
+    "@xterm/addon-unicode11": "/assets/vendor/addon-unicode11.mjs",
+    "@xterm/addon-web-links": "/assets/vendor/addon-web-links.mjs"
+  }
+}
+</script>
+<script type="module" src="/assets/app.js"></script>
+@SERVICE_WORKER@
+</head>
+<body>
+<noscript>The terminal hub needs JavaScript.</noscript>
+</body>
+</html>
