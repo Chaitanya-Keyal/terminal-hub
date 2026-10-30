@@ -44,6 +44,18 @@ const upgrade = origin => new Promise(res => {
 });
 check('a terminal connection from another site is refused', (await upgrade('http://evil.example')) !== 101);
 check("a terminal connection from the hub's own page is accepted", (await upgrade(BASE)) === 101);
+// ... and the same goes for sending files.
+const send = origin => new Promise(res => {
+  const req = http.request(`${BASE}/assets/send?place=laptop&name=x.txt`, { method: 'POST', headers: origin ? { Origin: origin } : {} },
+    r => { r.resume(); res(r.statusCode); });
+  req.on('error', () => res(0));
+  req.end('x');
+});
+check('another site (or no page at all) can\'t send files', (await send('http://evil.example')) === 403 && (await send('')) === 403);
+// Where files sent to the laptop place land, and what's on its screen (wrapped lines joined).
+const sent = name => join(hub.home, 'tmp-laptop', `terminal-hub-files-${process.getuid?.()}`, name);
+const readSent = name => { try { return readFileSync(sent(name), 'utf8'); } catch { return null; } };
+const screen = (place, s) => tmux(place, 'capture-pane', '-p', '-J', '-t', s);
 
 const browser = await launch();
 const context = options => hub.context(browser, options);
@@ -94,6 +106,20 @@ try {
   tmux('laptop', 'set-buffer', '-w', '-t', alphaClient, 'copied-é ✓');
   check("tmux's copy reaches the clipboard", await until(async () => (await page.evaluate(() => /** @type {any} */ (window).__copied)).includes('copied-é ✓')),
     JSON.stringify(await page.evaluate(() => /** @type {any} */ (window).__copied)));
+
+  await row(page, 'alpha').hover();
+  await row(page, 'alpha').locator('.row-more').click();
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('.menu .menu-item', { hasText: 'Send a file' }).click()]);
+  await chooser.setFiles({ name: 'shot 1.png', mimeType: 'image/png', buffer: Buffer.from('png-bytes') });
+  check("\"Send a file\" puts it on the session's machine", await until(() => readSent('shot_1.png') === 'png-bytes'), String(readSent('shot_1.png')));
+  check('... and types its path into the session', await until(() => screen('laptop', 'alpha').includes(sent('shot_1.png'))), screen('laptop', 'alpha'));
+  await page.locator('.pane.focused .xterm textarea').evaluate(el => {
+    const data = new DataTransfer();
+    data.items.add(new File(['pasted'], 'image.png', { type: 'image/png' }));
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  check('an image pasted into a terminal is sent the same way', await until(() => readSent('image.png') === 'pasted' && screen('laptop', 'alpha').includes(sent('image.png'))));
+  await page.keyboard.press('Control+U');  // clear the typed paths
 
   await row(page, 'gamma').locator('.row-main').click();
   check('switch to another place', await until(() => clients('server').includes('gamma')), clients('server').join());

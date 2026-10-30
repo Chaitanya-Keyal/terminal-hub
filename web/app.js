@@ -445,6 +445,7 @@ function viewFor(t) {
         load(keyOf(t));
       },
       attached: view => load(keyOf(view.target)),
+      files: (view, files) => sendFiles(view.target, files),
       actions: view => view.status === 'detached'
         ? [['Reattach', () => view.connect(), true], ['Close', () => closeTarget(view.target)]] : null,
     }, ['--existing', t]);
@@ -785,7 +786,7 @@ function openSettings() {
 }
 function closeSheet() { sheet?.remove(); sheet = null; }
 
-// ---- menus: a session's (rename, move, kill) and a page-made category's (edit, delete) ---------
+// ---- menus: a session's (send a file, rename, move, kill), a page-made category's (edit, delete)
 // A popover by the ⋯ button (or the pointer, for a right-click) on a desktop; a sheet on a phone.
 /** @typedef {{fill: (...kids: any[]) => void, item: (ic: string | Element, label: string, onclick: () => void, cls?: string) => HTMLElement, error: () => HTMLElement, focus: () => void, confirm: (title: any, question: any[], label: string, run: () => Promise<string>) => void}} MenuKit */
 /** @param {Element | {x: number, y: number}} at @param {string} label @param {(kit: MenuKit) => void} build */
@@ -853,6 +854,7 @@ function sessionMenu(t, at) {
 
     const choose = () => fill(title,
       wide() && openable(t) && !visible().includes(t) && item('columns-2', 'Open in a new pane', () => { closeMenu(); openBeside(t); }),
+      views.get(t)?.status === 'open' && item('paperclip', 'Send a file…', () => { closeMenu(); pickFiles(files => sendFiles(t, files)); }),
       item('pencil', 'Rename', rename),
       item('tag', 'Move to category', pickCategory),
       item('trash-2', 'Kill session', () => kit.confirm(title, ['Kill ', h('b', {}, nameOf(t)), '? Everything running in it stops.'], 'Kill', async () => {
@@ -1072,6 +1074,43 @@ function unlock(p) {
   document.body.append(el);
   view.mount(body);
   view.focus();
+}
+
+// ---- sending files: the ⋯ menu's Send a file, a drop on a terminal, an image pasted into one ----
+// Each goes to the session's machine (server.py's /send, then terminal-hub --receive), and its
+// path is typed into the session, ready for a command or an agent (Claude Code reads a pasted
+// image path as the image).
+/** @param {string} t @param {File[]} files */
+async function sendFiles(t, files) {
+  const paths = [];
+  let error = '';
+  for (const f of files) {
+    toast(`Sending ${f.name}…`, 300000);
+    try {
+      const r = await fetch(`/assets/send?place=${encodeURIComponent(keyOf(t))}&name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f });
+      const answer = await r.json().catch(() => ({}));
+      if (!r.ok || !answer.path) throw new Error(answer.error || `error ${r.status}`);
+      paths.push(answer.path);
+    } catch (e) {
+      error = `Couldn't send ${f.name}: ${e instanceof Error ? e.message : e}`;
+      break;
+    }
+  }
+  if (paths.length) {
+    if (!visible().includes(t)) openSession(t);
+    views.get(t)?.paste(paths.join(' ') + ' ');
+    focusTerm();
+  }
+  toast(error || (paths.length === 1 ? `Sent ${files[0].name}` : `Sent ${paths.length} files`), error ? 5000 : 1800);
+}
+
+/** @param {(files: File[]) => void} then */
+function pickFiles(then) {
+  const input = h('input', { type: 'file', multiple: true, hidden: true });
+  input.addEventListener('change', () => { input.remove(); if (input.files?.length) then([...input.files]); });
+  input.addEventListener('cancel', () => input.remove());
+  document.body.append(input);
+  input.click();
 }
 
 let toastTimer;

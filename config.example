@@ -45,3 +45,6 @@ HUB_DESCRIPTION='Every tmux session in one list'
 # same hub on an always-on server. Empty turns it off.
 HUB_FALLBACK=''
 HUB_FALLBACK_NAME=''                  # shown while switching, e.g. 'the server'
+
+# The local port for ttyd; the page's files use the next one up. Publish both (see the README).
+HUB_PORT=7682

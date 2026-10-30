@@ -3,18 +3,17 @@
 #   ./install.sh              install from this checkout (again after any change or config edit)
 #   ./install.sh --pull       git pull first (how another machine picks up changes)
 #   ./install.sh --uninstall  stop the services and remove everything except your config
-#   ./install.sh --no-services   install the files only (tests, containers); run ttyd and
-#                                web/server.py yourself, as in systemd/*.service
+#   ./install.sh --no-services   the files only: on the other machines (hub-state, share, the tmux
+#                                settings), or to run ttyd and server.py yourself (as in systemd/)
 #
-# Puts terminal-hub, share and hub-state in ~/.local/bin and the page (and the OpenCode plugin) in
-# ~/.local/share/terminal-hub,
-# and runs two systemd user services: ttyd (the page and its terminals) on 127.0.0.1:7682, and
-# server.py (the page's files and the session list) on 127.0.0.1:7683. Publishing them, for example
-# with `tailscale serve`, is up to you: see README.md.
+# Puts terminal-hub, share and hub-state in ~/.local/bin and the page, the tmux settings and the
+# OpenCode plugin in ~/.local/share/terminal-hub, and runs two systemd user services: ttyd (the
+# page and its terminals) on 127.0.0.1:HUB_PORT (7682), and server.py (the page's files and the
+# session list) on the next port. Publishing them, say with `tailscale serve`, is up to you.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-CONFIG=$HOME/.config/terminal-hub/config
+CONFIG=${TERMINAL_HUB_CONFIG:-$HOME/.config/terminal-hub/config}
 SHARE=$HOME/.local/share/terminal-hub
 BIN=$HOME/.local/bin
 UNITS=$HOME/.config/systemd/user
@@ -45,33 +44,40 @@ case ${1:-} in
   *) echo "usage: ./install.sh [--pull | --uninstall | --no-services]" >&2; exit 2 ;;
 esac
 
-for cmd in ttyd tmux python3; do
+need=(tmux python3)
+((services)) && need+=(ttyd)
+for cmd in "${need[@]}"; do
   command -v "$cmd" >/dev/null || { echo "terminal-hub needs $cmd" >&2; exit 1; }
 done
-ttyd_version=$(ttyd --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
-if ! printf '%s\n' 1.7 "$ttyd_version" | sort -V -C; then
-  echo "terminal-hub needs ttyd 1.7 or newer (found ${ttyd_version:-unknown})" >&2
-  exit 1
+if ((services)); then
+  ttyd_version=$(ttyd --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
+  if ! printf '%s\n' 1.7 "$ttyd_version" | sort -V -C; then
+    echo "terminal-hub needs ttyd 1.7 or newer (found ${ttyd_version:-unknown})" >&2
+    exit 1
+  fi
 fi
 
-mkdir -p "${CONFIG%/*}" "$SHARE" "$BIN" "$UNITS"
-first=0
-if [[ ! -f $CONFIG ]]; then
+mkdir -p "$SHARE" "$BIN"
+if ((services)) && [[ ! -f $CONFIG ]]; then
+  mkdir -p "${CONFIG%/*}"
   cp config.example "$CONFIG"
-  first=1
   echo "wrote $CONFIG from config.example: edit it (your places), then run ./install.sh again"
 fi
 
 # App settings: defaults, then the config. Here place() only notes the first place's label,
 # and the rest of the config is for terminal-hub.
 HUB_NAME='terminal hub' HUB_SHORT_NAME='hub' HUB_APP_ID='hub'
-HUB_DESCRIPTION='Every tmux session in one list' HUB_FALLBACK='' HUB_FALLBACK_NAME=''
+HUB_DESCRIPTION='Every tmux session in one list' HUB_FALLBACK='' HUB_FALLBACK_NAME='' HUB_PORT=7682
 HERE=''
 place() { [[ -n $HERE ]] || HERE=$2; }
 icon() { :; }
 category() { :; }
 # shellcheck source=/dev/null
-source "$CONFIG"
+[[ ! -f $CONFIG ]] || source "$CONFIG"
+if [[ ! $HUB_PORT =~ ^[0-9]+$ ]] || ((HUB_PORT < 1024 || HUB_PORT > 65534)); then
+  echo "HUB_PORT in $CONFIG: a port from 1024 to 65534" >&2
+  exit 1
+fi
 
 install -m 755 bin/terminal-hub bin/share bin/hub-state "$BIN/"
 
@@ -108,6 +114,7 @@ fallback = env["HUB_FALLBACK"]
 offline = ""
 if fallback:
     offline = (Path("web/offline.html").read_text(encoding="utf-8")
+               .replace("@NAME@", html.escape(env["HUB_NAME"]))
                .replace("@HERE@", html.escape(env["HERE"] or "this machine"))
                .replace("@FALLBACK_NAME@", html.escape(env["HUB_FALLBACK_NAME"] or fallback))
                .replace("@FALLBACK_URL@", html.escape(fallback))
@@ -151,18 +158,37 @@ cp web/server.py "$SHARE/"
 cp tmux/hub.conf "$SHARE/tmux.conf"
 mkdir -p "$SHARE/opencode"
 cp integrations/opencode/tui.js "$SHARE/opencode/"  # the OpenCode plugin (README: Agent status)
-rm -f "$SHARE/serve-assets.py"  # left by older versions
+tmux_hint() {
+  grep -qs 'terminal-hub/tmux.conf' "$HOME/.tmux.conf" ||
+    echo "optional: add the hub's tmux settings to ~/.tmux.conf (README: Install)"
+}
 
 if ((!services)); then
-  echo "installed the files into $SHARE (no services started)"
+  echo "installed the files (no services): hub-state, share and the tmux settings are ready"
+  tmux_hint
   exit 0
 fi
 
-# Services. ttyd re-reads the page for each visit, so only a changed unit needs a restart (which
-# drops open hub tabs; the tmux sessions carry on).
-restart=0
+# The services, made for this machine: systemd looks for programs only in the system folders, so
+# they get the full paths of ttyd and python3 found above, a PATH with the folders of the tools
+# terminal-hub runs, and HUB_PORT. ttyd re-reads the page for each visit, so only a changed unit
+# needs a restart (which drops open hub tabs; the tmux sessions carry on).
+path=$BIN
+add_path() { [[ -z $1 || :$path: == *:"$1":* ]] || path+=:$1; }
+for t in ttyd tmux python3 ssh; do p=$(command -v "$t") && add_path "${p%/*}"; done
+for d in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do add_path "$d"; done
+render() {
+  sed -e "s|^ExecStart=ttyd |ExecStart=$(command -v ttyd) |; s|--port 7682 |--port $HUB_PORT |" \
+    -e "s|^ExecStart=python3 |ExecStart=$(command -v python3) |; s|server.py 7683 |server.py $((HUB_PORT + 1)) |" \
+    -e "/^\[Service\]/a Environment=\"PATH=$path\"" "$1"
+}
+mkdir -p "$UNITS"
+restart=0 fresh=0
+[[ -f $UNITS/terminal-hub.service ]] || fresh=1
 for unit in systemd/*.service; do
-  cmp -s "$unit" "$UNITS/${unit##*/}" || { cp "$unit" "$UNITS/"; restart=1; }
+  dest=$UNITS/${unit##*/}
+  render "$unit" >"$dest.new"
+  if cmp -s "$dest.new" "$dest"; then rm "$dest.new"; else mv "$dest.new" "$dest"; restart=1; fi
 done
 systemctl --user daemon-reload
 systemctl --user enable --quiet "${SERVICES[@]}"
@@ -173,12 +199,11 @@ else
   systemctl --user start "${SERVICES[@]}"
 fi
 
-echo "installed '$HUB_NAME': ttyd on 127.0.0.1:7682, the page's files on 127.0.0.1:7683"
-if ((first)) || ! command -v tailscale >/dev/null; then
-  echo "publish it on your tailnet (tailnet only, with HTTPS):"
-  echo "  tailscale serve --bg --set-path / http://127.0.0.1:7682"
-  echo "  tailscale serve --bg --set-path /assets http://127.0.0.1:7683"
+echo "installed '$HUB_NAME': ttyd on 127.0.0.1:$HUB_PORT, the page's files on 127.0.0.1:$((HUB_PORT + 1))"
+if ((fresh)); then
+  echo "publish both through something that authenticates (README: Install), say on your tailnet:"
+  echo "  tailscale serve --bg --set-path / http://127.0.0.1:$HUB_PORT"
+  echo "  tailscale serve --bg --set-path /assets http://127.0.0.1:$((HUB_PORT + 1))"
 fi
-grep -qs 'terminal-hub/tmux.conf' "$HOME/.tmux.conf" ||
-  echo "optional: add the hub's tmux settings to ~/.tmux.conf (see README.md)"
+tmux_hint
 echo "check the setup any time with: terminal-hub --check"

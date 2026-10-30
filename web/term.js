@@ -73,7 +73,8 @@ export class TermView {
   // args: the command's arguments, e.g. ['laptop:notes'] or ['--unlock', 'server'];
   // again: the arguments for reconnecting (default: args), e.g. ['--existing', 'laptop:notes'].
   // hooks: {fontSize, renderer, ctrl() → bool, ctrlUsed(), status(view), copied(),
-  //   actions(view) → [[label, fn]], attached(view): a connection's first output (the session exists)}
+  //   actions(view) → [[label, fn]], attached(view): a connection's first output (the session exists),
+  //   files(view, files): files dropped on it, or an image pasted into it}
   constructor(args, hooks, again = args) {
     this.args = args;
     this.again = again;
@@ -133,6 +134,22 @@ export class TermView {
     this.el.addEventListener('contextmenu', e => {
       if (t.modes.mouseTrackingMode !== 'none' && !(MAC ? e.altKey : e.shiftKey)) e.preventDefault();
     });
+    // Files dropped here, or an image pasted (a screenshot; pasted text stays xterm's), go to the
+    // page, which sends them to the session's machine.
+    this.el.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+    this.el.addEventListener('drop', e => {
+      const files = [...(e.dataTransfer?.files ?? [])];
+      if (!files.length || !this.hooks.files) return;
+      e.preventDefault();
+      this.hooks.files(this, files);
+    });
+    this.el.addEventListener('paste', e => {
+      const files = [...(e.clipboardData?.files ?? [])];
+      if (!files.length || e.clipboardData?.getData('text') || !this.hooks.files) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.hooks.files(this, files);
+    }, true);
     new ResizeObserver(() => this.refit()).observe(this.el);
   }
 

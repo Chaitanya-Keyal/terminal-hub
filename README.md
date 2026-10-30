@@ -4,10 +4,11 @@ Every tmux session on your machines, in one web page that works on a phone and o
 
 terminal-hub lists the tmux sessions of every machine you give it (this one, others over ssh,
 other users on either) and opens any of them in a real terminal: side by side on a desktop, one
-at a time with a key bar on a phone. Coding agents (Claude Code, OpenCode) get a dot that says whether
-they're working, waiting for you, or done. It runs on one machine, you reach it privately over
-your tailnet, and there's nothing to build: plain JavaScript, a bash script and a small Python
-server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xtermjs.org).
+at a time with a key bar on a phone. Coding agents (Claude Code, OpenCode) get a dot that says
+whether they're working, waiting for you, or done. It runs on one machine, you reach it privately
+(over your tailnet, say), and there's nothing to build: plain JavaScript, a few bash scripts and
+a small Python server around [ttyd](https://github.com/tsl0922/ttyd) and
+[xterm.js](https://xtermjs.org).
 
 ![Two phones: the list of sessions on three machines with status dots, and a session in vim with the key bar](docs/screenshot.png)
 
@@ -20,8 +21,8 @@ server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xte
   reached says so, one whose ssh key is locked offers to unlock it, and a slow one never holds up
   the rest.
 - **Categories** group sessions above the places, say one per project, even across machines.
-  Rules in the config sort sessions by folder or name, and the ⋯ menu moves any session.
-  Every group collapses, and a collapsed one still shows if a session in it needs you.
+  Rules in the config sort sessions by folder or name, and the ⋯ menu moves any session. Every
+  group collapses, and a collapsed one still shows if a session in it needs you.
 - **Desktop:** a sidebar and up to four sessions side by side. Recent sessions stay connected in
   the background, so switching is instant, and a reload brings your layout back.
 - **Phone:** a home screen with every session, then one session at a time with a top bar and a
@@ -30,8 +31,11 @@ server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xte
 - **Agent status:** a blue dot while an agent works, yellow when it waits for you (a permission
   prompt or a question; also counted in the tab title), green when it's done, until you look.
   Turn on notifications and the hub tells you when a session needs you or finishes.
-- **New sessions** from the list: press + by a place, type a name or leave it blank. Each session's
-  ⋯ menu renames it or kills it (after asking).
+- **Files into a session:** send a photo or any file from your phone (⋯, **Send a file**), or drop
+  one on a terminal or paste a screenshot on a desktop. It's saved on the session's machine and
+  its path is typed in, ready for a command, or for Claude Code, which reads it as an image.
+- **New sessions** from the list: press + by a place, type a name or leave it blank. Each
+  session's ⋯ menu renames it or kills it (after asking).
 - **`share`** moves the terminal you're in into tmux, so it shows up in the list. `share -- claude`
   starts a program in its own session.
 
@@ -39,34 +43,35 @@ server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xte
 
 ```
  browser (phone or desktop)
-    │  HTTPS, tailnet only
+    │  HTTPS, through something that authenticates
     ▼
- tailscale serve ─┬─ /        →  ttyd       127.0.0.1:7682   the page, and one terminal per open session
-                  └─ /assets  →  server.py  127.0.0.1:7683   the page's files, and the session list
+ tailscale serve ─┬─ /        →  ttyd       127.0.0.1:7682   the page, a terminal per session
+ (or a proxy)     └─ /assets  →  server.py  127.0.0.1:7683   its files, the list, files you send
                                      │
                               terminal-hub (bash)
                                      │
              tmux here  ·  tmux on other machines (ssh)  ·  tmux as another user (sudo)
 ```
 
-Everything runs on one machine, the hub. Each session you open in the page is its own
-connection to ttyd, which runs `terminal-hub KEY:NAME` to attach to that tmux session: directly,
-over ssh, or through sudo. The list comes from `terminal-hub --list KEY`, which `server.py` runs
-for each place on its own and keeps answering with the latest lists, so a slow place doesn't
-delay the others; ssh connections are reused for a minute. Open pages get changes pushed to them
-over one connection (server-sent events) instead of asking again and again. The page's files have versioned URLs,
-so browsers keep them, and they load in parallel. When a session closes, `terminal-hub` tells the page why (you detached,
-the session ended, or the connection dropped), so the page can offer to reattach. Renaming and
-killing a session run `terminal-hub --rename` and `--kill` through ttyd the same way.
+Everything runs on one machine, the hub. Each session you open in the page is its own connection
+to ttyd, which runs `terminal-hub KEY:NAME` to attach to that tmux session: directly, over ssh, or
+through sudo. When a session closes, `terminal-hub` tells the page why (you detached, the session
+ended, or the connection dropped), so the page can offer to reattach. Renaming and killing a
+session run `terminal-hub --rename` and `--kill` through ttyd the same way.
 
-The other machines run nothing new: they need tmux, and ssh key login from the hub.
+The list comes from `terminal-hub --list KEY`, which `server.py` runs for each place on its own, so
+a slow place doesn't delay the others; ssh connections are reused for a minute. Open pages get
+changes pushed to them over one connection (server-sent events). The page's files have versioned
+URLs, so browsers keep them.
+
+The other machines need only tmux, and ssh key login from the hub. For the status dots and the
+hub's tmux settings there, run `./install.sh --no-services` on them too.
 
 ## Install
 
-On the hub you need Linux (WSL works) with systemd user services, [ttyd](https://github.com/tsl0922/ttyd)
-1.7 or newer, tmux and python3. [fzf](https://github.com/junegunn/fzf) is optional (a command-line
-picker). To reach the hub you need [Tailscale](https://tailscale.com) or another proxy that
-authenticates.
+On the hub you need Linux (WSL works) with systemd user services,
+[ttyd](https://github.com/tsl0922/ttyd) 1.7 or newer, tmux and python3.
+[fzf](https://github.com/junegunn/fzf) is optional (a command-line picker).
 
 ```sh
 git clone https://github.com/Chaitanya-Keyal/terminal-hub && cd terminal-hub
@@ -77,7 +82,8 @@ loginctl enable-linger "$USER"         # keep it running while you're logged out
 terminal-hub --check
 ```
 
-Then publish it on your tailnet (on WSL, run these with the Windows `tailscale.exe`):
+Then publish it. With [Tailscale](https://tailscale.com) (on WSL, run these with the Windows
+`tailscale.exe`):
 
 ```sh
 tailscale serve --bg --set-path / http://127.0.0.1:7682
@@ -86,9 +92,17 @@ tailscale serve --bg --set-path /assets http://127.0.0.1:7683
 
 Open `https://MACHINE.TAILNET.ts.net` on your phone and add it to the home screen.
 
-The hub's tmux settings are optional but recommended: they turn on mouse mode (for swipe scrolling),
-size windows to whichever screen you used last, and add a quiet status line tagged with the place.
-In `~/.tmux.conf` on each machine that has `~/.local/share/terminal-hub/tmux.conf`:
+Any other reverse proxy works if it authenticates you first (ttyd hands out shells) and:
+
+- sends `/` and its websockets to ttyd, and `/assets/…` to server.py with `/assets` cut off;
+- keeps the `Host` header (both compare it with the page's `Origin`);
+- doesn't buffer `/assets/events` (server-sent events), and lets `/assets/send` take files up to
+  100 MB.
+
+**The hub's tmux settings** are optional but recommended: they turn on mouse mode (for swipe
+scrolling and drag-to-copy), size windows to whichever screen you used last, and add a quiet
+status line tagged with the place. In `~/.tmux.conf` on each machine (`./install.sh
+--no-services` puts the file on the other machines):
 
 ```tmux
 set -g @hub-tag laptop               # default: the hostname
@@ -115,6 +129,11 @@ Changes to places apply at once. The first place is "here", where links without 
   shows **Unlock**, which asks for the passphrase once.
 - Session names are 1 to 32 letters, digits, `-` and `_`.
 
+The app settings (`HUB_NAME` and friends) are built into the page, and `HUB_PORT` (ttyd's port;
+the page's files use the next one) into the services, so run `./install.sh` after changing them.
+`HUB_FALLBACK` makes the installed app open another URL when this machine doesn't answer within 4
+seconds, say the same hub on an always-on server.
+
 ### Icons and categories
 
 ```bash
@@ -124,36 +143,34 @@ category work  Work  briefcase '*/work/*'   # sessions started in a work folder
 category ops   Ops   rocket    'srv:*' 'deploy*'
 ```
 
+A session goes into the first category with a matching pattern: one with a `/` matches the folder
+the session started in, one with a `:` matches `PLACE:NAME`, and any other matches the session's
+name (`*` and `?` work as in the shell). The ⋯ menu's **Move to category** overrides the rules for
+that session, **No category** included; it's kept in the session's tmux option `@hub-category`.
+Categories with no sessions don't show.
+
 You can also make categories on the page: a session's ⋯, **Move to category**, **New
 category…**, with a name, an icon, and (ticked unless it's your home folder) a rule that catches
-sessions started in that session's folder, so the next `cc` there lands in it too. Those live in
-`~/.config/terminal-hub/categories` (one per line, tab-separated; not run as code), and their own ⋯
-renames or deletes them. Categories in the config are changed in the config.
-
-A session goes into the first category with a matching pattern: one with a `/` matches the
-folder the session started in, one with a `:` matches `PLACE:NAME`, and any other matches the
-session's name (`*` and `?` work as in the shell). The ⋯ menu's **Move to category** overrides
-the rules for that session, **No category** included; it's kept in the session's tmux option
-`@hub-category`. Categories with no sessions don't show.
+sessions started in that session's folder, so the next one started there lands in it too. Those
+live in `~/.config/terminal-hub/categories` (one per line, tab-separated; not run as code), and
+their own ⋯ renames or deletes them. Categories in the config are changed in the config.
 
 Icons can be an emoji, or one of these [Lucide](https://lucide.dev/icons) names: bitcoin,
 book-open, bot, box, brain, briefcase, bug, building-2, chart-line, cloud, code, coffee,
-container, cpu, database, flame, flask-conical, folder, folder-git-2, gamepad-2, gem,
-git-branch, globe, graduation-cap, hammer, hard-drive, heart, house, key-round, laptop, layers,
-leaf, mail, monitor, moon, mountain, music, package, palette, puzzle, rocket, router, server,
-shield, smartphone, sparkles, star, sun, target, terminal, user, users, wallet, wrench, zap.
-More can be added to `tools/vendor.sh`.
-
-The app settings (`HUB_NAME` and friends) are built into the page, so run `./install.sh` after
-changing them. `HUB_FALLBACK` makes the installed app open another URL when this machine doesn't
-answer within 4 seconds, say the same hub on an always-on server.
+container, cpu, database, flame, flask-conical, folder, folder-git-2, gamepad-2, gem, git-branch,
+globe, graduation-cap, hammer, hard-drive, heart, house, key-round, laptop, layers, leaf, mail,
+monitor, moon, mountain, music, package, palette, puzzle, rocket, router, server, shield,
+smartphone, sparkles, star, sun, target, terminal, user, users, wallet, wrench, zap. More can be
+added to `tools/vendor.sh`.
 
 ## Using it
 
 **Desktop.** Click a session to open it. Shift+click, or the split button that appears on hover,
-opens it in a new pane beside the others. The ⋯ button next to it, or a right-click on it, renames
-it, moves it to another category, or kills it. Click a group's name to collapse it. The keyboard button at the bottom of the sidebar lists
-the shortcuts, and common tmux keys after the open session's tmux prefix:
+opens it in a new pane beside the others. The ⋯ button next to it, or a right-click on it,
+renames it, moves it to another category, or kills it, and for an open session sends a file (so
+does dropping a file on its terminal, or pasting an image into it). Click a group's name to
+collapse it. The keyboard button at the bottom of the sidebar lists the shortcuts, and common tmux
+keys after the open session's tmux prefix:
 
 | | |
 | --- | --- |
@@ -163,12 +180,19 @@ the shortcuts, and common tmux keys after the open session's tmux prefix:
 | Shift+drag | select text to copy |
 | Shift+right-click | the browser's menu |
 
-With tmux's mouse mode on, tmux gets plain drags and right-clicks (its own menu); Shift hands them
-to the page instead. On a Mac, use ⌥ rather than Shift.
+With tmux's mouse mode on, tmux gets plain drags (its copy reaches your clipboard) and
+right-clicks (its own menu); Shift hands them to the page instead. On a Mac, use ⌥ rather than
+Shift.
 
 **Phone.** Tap a session to open it, and use the back button (or the browser's) to return to the
-list. The ⋯ on each session, and the one in the top bar, rename, move or kill it. The top bar's swap button jumps to the last session. ctrl on the key bar applies to the next
-key; arrows repeat while held. The gear on the home screen sets the text size.
+list. The ⋯ on each session, and the one in the top bar, rename, move or kill it; the top bar's
+also sends a file into the session. The swap button jumps to the last session. ctrl on the key
+bar applies to the next key; arrows repeat while held. The gear on the home screen sets the text
+size.
+
+**Sent files** land in a private folder on the session's machine, `$TMPDIR/terminal-hub-files-UID`
+(`/tmp/…` without a TMPDIR), which the system clears now and then. Their names keep letters,
+digits, `.`, `-` and `_`.
 
 **Links.** `/?arg=KEY:NAME` opens session NAME on place KEY, creating it if it doesn't exist.
 `/?arg=NAME` does the same on the first place, `/?arg=new` starts a new shell there, and
@@ -176,8 +200,8 @@ key; arrows repeat while held. The gear on the home screen sets the text size.
 
 ## Agent status
 
-The dots come from two tmux options on each session, which anything inside the session can set
-with `hub-state`:
+The dots come from options on each tmux session, which anything inside the session can set with
+`hub-state`:
 
 ```sh
 hub-state working    # blue
@@ -200,11 +224,11 @@ jq --slurpfile h integrations/claude-code.json \
 
 Every hook runs `~/.local/bin/hub-state hook`, which reads the event and sets the dot: working
 when you send a message, waiting when a permission prompt or a question opens, working again as
-soon as you answer (no hook says so, so `hub-state` watches the prompt close; after a no, Claude
-waits for you, and the dot stays), done when the turn ends (on an error too), cleared when Claude exits. A subagent
-finishing its work doesn't hide a question the main agent is asking you. Outside tmux the hooks do
-nothing. One gap: Claude Code has no hook for interrupting it with Esc, so after that the dot stays
-blue until your next message.
+soon as you answer, done when the turn ends (on an error too), and cleared when you stop Claude
+(Esc, or no to a permission) or it exits. Claude Code has no hooks for answering a prompt or for
+stopping, so during a turn `hub-state` watches for those in the background (the prompt closing on
+screen, the interruption in Claude's transcript). A subagent finishing its work doesn't hide a
+question the main agent is asking you. Outside tmux the hooks do nothing.
 
 **OpenCode** (v2) sets them through a small plugin that runs in its terminal window, so it knows
 its tmux pane even when OpenCode's server is the shared background service. install.sh puts it in
@@ -218,8 +242,8 @@ its tmux pane even when OpenCode's server is the shared background service. inst
 The dot is working while one of the window's tabs is busy, waiting when one asks for a permission
 or a question, done when they finish, and cleared when you stop one with Esc or close OpenCode.
 
-Agents on other machines need `hub-state` there: copy `bin/hub-state` to `~/.local/bin/` on that
-machine (and, for OpenCode, the plugin folder).
+Agents on the other machines need `hub-state` (and, for OpenCode, the plugin) there: run
+`./install.sh --no-services` on each, and set up the hooks or the plugin as above.
 
 **Notifications.** The bell at the bottom of the sidebar (on a phone: the gear, then
 Notifications) asks the browser to allow them. Then a session that starts waiting for you, or
@@ -240,17 +264,18 @@ back. With a command, the session runs just that command and closes when it exit
 function saves typing, and passes arguments along:
 
 ```sh
-cc() { share -- claude "$@"; }       # cc --resume
+cl() { share -- claude "$@"; }       # cl --resume
 ```
 
 ## Security
 
 ttyd gives a shell to anyone who can reach it, so both services listen on 127.0.0.1 only. Publish
-them only through something that authenticates, such as `tailscale serve` (tailnet only), and never
-expose ports 7682 and 7683 directly. ttyd runs with `--check-origin`, so other websites can't open
-terminals through your browser. Everything that changes something (opening, creating, renaming
-or killing a session) goes through ttyd; `server.py` only reads. The session list (`/assets/sessions.json`) shows session names; it's
-published the same way as the rest.
+them only through something that authenticates, such as `tailscale serve` (tailnet only), and
+never expose the two ports directly. Other websites can't use your browser to get in: ttyd runs
+with `--check-origin`, so it takes terminals only from the hub's own page, and server.py does the
+same check before saving a file you send. Everything else that changes something (opening,
+creating, renaming or killing a session) goes through ttyd. The session list
+(`/assets/sessions.json`) shows session names; it's published the same way as the rest.
 
 ## Updating and removing
 
@@ -259,12 +284,12 @@ published the same way as the rest.
 ./install.sh --uninstall             # stop and remove everything except your config
 ```
 
-Updates apply when you reload the page; your tmux sessions keep running. A changed service unit
+Updates apply when you reload the page; your tmux sessions keep running. A changed service
 restarts ttyd, and open pages reconnect.
 
 ## Troubleshooting
 
-`terminal-hub --check` checks the tools, the config, every place and the services.
+`terminal-hub --check` checks the tools, the config, every place, the services and the ports.
 
 - **A place says Unreachable:** ssh couldn't connect within 5 seconds. Try `ssh HOST true` as the
   hub's user; it has to work without a password prompt.
@@ -278,11 +303,10 @@ restarts ttyd, and open pages reconnect.
 - **"Notifications are blocked":** the browser was told no once; allow notifications in the
   site's settings (the lock or tune icon next to the address), then turn the bell on again.
 - **No notifications, though they're allowed:** the system may hide the browser's notifications.
-  On Windows, check Settings →
-  System → Notifications (the switch at the top, which covers every app, then your browser), and
-  Do not disturb. A browser that forgets the
-  permission when it closes (Edge: "Choose what to clear every time you close the browser", Site
-  permissions) turns the bell off again on the next visit.
+  On Windows, check Settings → System → Notifications (the switch at the top, which covers every
+  app, then your browser), and Do not disturb. A browser that forgets the permission when it
+  closes (Edge: "Choose what to clear every time you close the browser", Site permissions) turns
+  the bell off again on the next visit.
 
 ## Where things go
 
@@ -294,8 +318,10 @@ restarts ttyd, and open pages reconnect.
 | `~/.local/share/terminal-hub/` | the page, `server.py`, the tmux settings and the OpenCode plugin |
 | `~/.config/systemd/user/terminal-hub.service` | ttyd |
 | `~/.config/systemd/user/terminal-hub-assets.service` | `server.py` |
+| `$TMPDIR/terminal-hub-files-UID/` | files sent from the page, on the session's machine |
 
-For per-machine changes to a service, like a PATH or a port, use a drop-in:
+install.sh writes the services for this machine (where it found ttyd, python3 and the tools
+terminal-hub runs, and `HUB_PORT`). For anything else, use a drop-in:
 `systemctl --user edit terminal-hub`.
 
 ## Development
@@ -313,7 +339,7 @@ npm run screenshots                  # a demo hub with made-up sessions, into ..
 ```
 
 `tools/vendor.sh` downloads the pinned xterm.js and Lucide versions into `web/vendor/` and checks
-their integrity.
+their integrity. `icons/make-icons.py` draws the app icon (it needs Pillow).
 
 ## Credits
 

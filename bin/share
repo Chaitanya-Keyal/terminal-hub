@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # share [name] [-- command...]: move this terminal into a tmux session so it also shows up in
-# the terminal hub on the phone. Detach (Ctrl-b d) to get back to the plain shell; the session
+# the terminal hub. Detach (your tmux prefix, then d) to get back to the plain shell; the session
 # keeps running until you `exit` it.
 #
 # With a command, the session runs just that command and closes when it exits, e.g.
-#   share -- claude          (a shell function like `cc() { share -- claude "$@"; }` saves typing)
+#   share -- claude          (a shell function like `cl() { share -- claude "$@"; }` saves typing)
 name='' cmd=()
 if [[ -n ${1:-} && $1 != -- ]]; then name=$1; shift; fi
 [[ ${1:-} == -- ]] && { shift; cmd=("$@"); }

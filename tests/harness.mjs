@@ -34,12 +34,13 @@ export async function startHub({ places, extraConfig = [], homeFiles = {} }) {
   const dirs = {};
   const lines = [];
   for (const p of places) {
-    dirs[p.key] = { sock: join(home, `tmux-${p.key}`), home: join(home, `home-${p.key}`) };
+    dirs[p.key] = { sock: join(home, `tmux-${p.key}`), home: join(home, `home-${p.key}`), tmp: join(home, `tmp-${p.key}`) };
     mkdirSync(dirs[p.key].sock, { mode: 0o700 });
     mkdirSync(dirs[p.key].home);
+    mkdirSync(dirs[p.key].tmp);  // where files sent from the page land
     writeFileSync(join(dirs[p.key].home, '.tmux.conf'), p.tmuxConf ?? 'set -g status off\n');
     for (const [name, text] of Object.entries(homeFiles)) writeFileSync(join(dirs[p.key].home, name), text);
-    lines.push(`place ${p.key} ${p.label} '${p.colour}' via env TMUX_TMPDIR=${dirs[p.key].sock} HOME=${dirs[p.key].home} bash -c`);
+    lines.push(`place ${p.key} ${p.label} '${p.colour}' via env TMUX_TMPDIR=${dirs[p.key].sock} HOME=${dirs[p.key].home} TMPDIR=${dirs[p.key].tmp} bash -c`);
   }
   mkdirSync(join(home, '.config/terminal-hub'), { recursive: true });
   writeFileSync(join(home, '.config/terminal-hub/config'), [...lines, ...extraConfig].join('\n') + '\n');

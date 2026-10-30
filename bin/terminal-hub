@@ -15,6 +15,8 @@
 #   terminal-hub --new-category LABEL ICON [PATTERN...]   make a category (the page does this)
 #   terminal-hub --edit-category KEY LABEL ICON           rename one made that way
 #   terminal-hub --delete-category KEY                    and remove it
+#   terminal-hub --receive KEY FILENAME   save stdin as a file in place KEY, print its path (the
+#                              page's "Send a file", through server.py)
 #   terminal-hub --check       check the setup: tools, config, every place, services
 #   terminal-hub               pick a session with fzf and attach (in an ordinary terminal)
 #
@@ -25,7 +27,7 @@
 #
 # install.sh copies this to ~/.local/bin; edit the copy in the repo.
 set -u
-CONFIG=${TERMINAL_HUB_CONFIG:-$HOME/.config/terminal-hub/config}
+CONFIG=${TERMINAL_HUB_CONFIG:-$HOME/.config/terminal-hub/config}  # the tests use their own
 RUN=${XDG_RUNTIME_DIR:-/tmp}/terminal-hub-$(id -u)
 
 die() { echo "terminal-hub: $*" >&2; exit 1; }
@@ -41,7 +43,8 @@ index_of() {
 NAME_RE='^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$'
 NAME_RULE="use 1-32 letters, digits, - and _ (not starting with -)"
 
-# The config (see config.example) calls these.
+# The config (see config.example) calls these, and may set HUB_PORT (for --check).
+HUB_PORT=7682
 KEY=() LABEL=() COLOUR=() KIND=() ARGS=()
 place() {  # place KEY LABEL COLOUR local|ssh|via [ARGS...]
   [[ $1 =~ ^[A-Za-z0-9_-]+$ ]] || die "place key '$1' in $CONFIG: use letters, digits, - and _"
@@ -380,10 +383,35 @@ cmd_check() {
     echo "services"
     for t in terminal-hub terminal-hub-assets; do say "$t" "$(systemctl --user is-active "$t" 2>/dev/null)"; done
   fi
-  echo "publish (tailnet only)"
-  echo "  tailscale serve --bg --set-path / http://127.0.0.1:7682"
-  echo "  tailscale serve --bg --set-path /assets http://127.0.0.1:7683"
+  echo "ports (publish both through something that authenticates: README, Install)"
+  for t in "ttyd $HUB_PORT" "files $((HUB_PORT + 1))"; do
+    if (exec 3<>"/dev/tcp/127.0.0.1/${t#* }") 2>/dev/null; then say "${t% *}" "127.0.0.1:${t#* } answers"
+    else say "${t% *}" "nothing on 127.0.0.1:${t#* }"; ok=0; fi
+  done
   ((ok))
+}
+
+# --receive KEY FILENAME: stdin into a file in place KEY, in a private folder for files sent from
+# the page; prints its path, for the page to type. The name keeps letters, digits, . - and _, and
+# gets a number in front if it's taken. The code goes through one shell there: no single quotes.
+cmd_receive() {
+  local i a name code
+  i=$(find_place "${1:-}") || die "no place called ${1:-}"
+  name=${2//[^A-Za-z0-9._-]/_}
+  while [[ $name == [.-]* ]]; do name=${name:1}; done
+  name=${name:0:80}
+  name=${name:-file}
+  code="d=\"\${TMPDIR:-/tmp}/terminal-hub-files-\$(id -u)\"; umask 077; mkdir -p \"\$d\" && [ -O \"\$d\" ] || exit 1;"
+  code+=" f=\"\$d/$name\" n=2; while [ -e \"\$f\" ]; do f=\"\$d/\$n-$name\" n=\$((n + 1)); done; cat >\"\$f\" && echo \"\$f\""
+  read -ra a <<<"${ARGS[i]}"
+  case ${KIND[i]} in
+    local) sh -c "$code" ;;
+    via) "${a[@]}" "$code" ;;
+    ssh)
+      (umask 077 && mkdir -p "$RUN")
+      timeout 300 ssh "${LIST_SSH[@]}" "${a[0]}" "${a[*]:1} sh -c '$code'"
+      ;;
+  esac
 }
 
 # The command-line picker: every session in one fzf list.
@@ -421,8 +449,9 @@ case ${1:-} in
   --unlock) cmd_unlock "${2:-}" ;;
   --rename) cmd_rename "${2:-}" "${3:-}" ;;
   --kill) cmd_kill "${2:-}" ;;
+  --receive) cmd_receive "${2:-}" "${3:-}" ;;
   --check) cmd_check ;;
-  -h | --help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' ;;
   '') cmd_pick ;;
   -*) die "unknown option $1 (see terminal-hub --help)" ;;
   *) go "$1" ;;
