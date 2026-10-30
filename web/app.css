@@ -169,6 +169,7 @@ kbd .icon { width: 12px; height: 12px; }
 .side-head .brand { flex: 1; }
 #sidebar .search { margin: 0 10px 8px; }
 #sidebar .list { padding-bottom: 12px; }
+.side-foot [aria-pressed="true"] { color: var(--accent); }
 .side-foot { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-top: 1px solid var(--line); flex: none; }
 #rail {
   flex-direction: column; align-items: center; width: 44px; flex: none; padding-top: 9px;
@@ -316,6 +317,18 @@ kbd .icon { width: 12px; height: 12px; }
 }
 .sheet-grip { width: 38px; height: 4px; margin: 2px auto 14px; border-radius: 2px; background: var(--line-2); }
 .setting { display: flex; align-items: center; justify-content: space-between; min-height: 48px; font-size: 16px; }
+.setting { gap: 16px; }
+.setting > span { display: grid; gap: 2px; }
+.setting small { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+.setting + .setting { margin-top: 6px; }
+/* An on/off switch (role="switch"). */
+.switch { position: relative; width: 48px; height: 28px; flex: none; border-radius: 14px; background: var(--raise-3); transition: background .15s; }
+.switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--text-2); transition: transform .15s, background .15s;
+}
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(20px); background: #08110a; }
 .stepper { display: flex; align-items: center; gap: 6px; }
 .stepper .icon-btn { width: 44px; height: 44px; background: var(--raise-2); border-radius: 10px; color: var(--text); }
 .stepper .icon-btn .icon { width: 20px; height: 20px; }

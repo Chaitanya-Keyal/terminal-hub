@@ -29,6 +29,7 @@ server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xte
   Swipes scroll tmux history, and the page installs as an app.
 - **Agent status:** a blue dot while an agent works, yellow when it waits for you (a permission
   prompt or a question; also counted in the tab title), green when it's done, until you look.
+  Turn on notifications and the hub tells you when a session needs you or finishes.
 - **New sessions** from the list: press + by a place, type a name or leave it blank. Each session's
   ⋯ menu renames it or kills it (after asking).
 - **`share`** moves the terminal you're in into tmux, so it shows up in the list. `share -- claude`
@@ -52,7 +53,8 @@ Everything runs on one machine, the hub. Each session you open in the page is it
 connection to ttyd, which runs `terminal-hub KEY:NAME` to attach to that tmux session: directly,
 over ssh, or through sudo. The list comes from `terminal-hub --list KEY`, which `server.py` runs
 for each place on its own and keeps answering with the latest lists, so a slow place doesn't
-delay the others; ssh connections are reused for a minute. The page's files have versioned URLs,
+delay the others; ssh connections are reused for a minute. Open pages get changes pushed to them
+over one connection (server-sent events) instead of asking again and again. The page's files have versioned URLs,
 so browsers keep them, and they load in parallel. When a session closes, `terminal-hub` tells the page why (you detached,
 the session ended, or the connection dropped), so the page can offer to reattach. Renaming and
 killing a session run `terminal-hub --rename` and `--kill` through ttyd the same way.
@@ -198,7 +200,14 @@ nothing. One gap: Claude Code has no hook for interrupting it with Esc, so after
 blue until your next message.
 
 Agents on other machines need `hub-state` there: copy `bin/hub-state` to `~/.local/bin/` on that
-machine. OpenCode isn't supported yet: its plugins run in a shared background process, so they
+machine.
+
+**Notifications.** The bell at the bottom of the sidebar (on a phone: the gear, then
+Notifications) asks the browser to allow them. Then a session that starts waiting for you, or
+finishes, raises a notification, unless it's on your screen; clicking it opens the session. They
+come while the hub is open, in any tab or window: a browser can't run a page that's closed, so a
+phone gets them while the app is open or just in the background. On an iPhone, add the hub to the
+home screen first (Safari offers notifications only to installed apps). OpenCode isn't supported yet: its plugins run in a shared background process, so they
 can't tell which terminal an event belongs to.
 
 ## share
@@ -248,6 +257,8 @@ restarts ttyd, and open pages reconnect.
 - **The page loads but the list stays empty:** `/assets` isn't published, or the asset service is
   down: `systemctl --user status terminal-hub-assets`.
 - **Swiping doesn't scroll:** turn on tmux mouse mode (the hub's tmux settings do).
+- **"Notifications are blocked":** the browser was told no once; allow notifications in the
+  site's settings (the lock or tune icon next to the address), then turn the bell on again.
 
 ## Where things go
 

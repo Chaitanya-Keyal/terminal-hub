@@ -100,9 +100,10 @@ manifest = {
 }
 (assets / "app.webmanifest").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-# The fallback: a service worker that opens another hub when this machine doesn't answer.
-sw_tag = ""
+# The service worker: notifications go through it, and with HUB_FALLBACK it opens another hub
+# when this machine doesn't answer (offline.html says so on the way).
 fallback = env["HUB_FALLBACK"]
+offline = ""
 if fallback:
     offline = (Path("web/offline.html").read_text(encoding="utf-8")
                .replace("@HERE@", html.escape(env["HERE"] or "this machine"))
@@ -110,12 +111,11 @@ if fallback:
                .replace("@FALLBACK_URL@", html.escape(fallback))
                .replace("@FALLBACK_JSON@", json.dumps(fallback)))
     (assets / "offline.html").write_text(offline, encoding="utf-8")
-    # The cache name follows what it caches, so phones refresh it when either changes.
-    version = hashlib.sha256(offline.encode() + (assets / "app-192.png").read_bytes()).hexdigest()[:8]
-    sw = (Path("web/sw.js").read_text(encoding="utf-8")
-          .replace("@FALLBACK_JSON@", json.dumps(fallback)).replace("@VERSION@", version))
-    (assets / "sw.js").write_text(sw, encoding="utf-8")
-    sw_tag = "<script>navigator.serviceWorker?.register('/assets/sw.js', { scope: '/' }).catch(() => {});</script>"
+# The cache name follows what it caches, so phones refresh it when either changes.
+cache = hashlib.sha256(offline.encode() + (assets / "app-192.png").read_bytes()).hexdigest()[:8]
+sw = (Path("web/sw.js").read_text(encoding="utf-8")
+      .replace("@FALLBACK_JSON@", json.dumps(fallback)).replace("@VERSION@", cache))
+(assets / "sw.js").write_text(sw, encoding="utf-8")
 
 # The page's files get versioned URLs (/assets/v/HASH), which server.py lets browsers keep for
 # good: one hash for the libraries and the font, which rarely change, and one for the rest, so an
@@ -137,8 +137,7 @@ page = (Path("web/index.html").read_text(encoding="utf-8")
         .replace("@LIB@", lib_version)
         .replace("@APP@", app_version)
         .replace("@NAME@", html.escape(env["HUB_NAME"]))
-        .replace("@DESCRIPTION@", html.escape(env["HUB_DESCRIPTION"]))
-        .replace("@SERVICE_WORKER@", sw_tag))
+        .replace("@DESCRIPTION@", html.escape(env["HUB_DESCRIPTION"])))
 (share / "index.html").write_text(page, encoding="utf-8")
 PY
 

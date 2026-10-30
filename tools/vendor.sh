@@ -12,7 +12,7 @@ LUCIDE=1.65.0
 # Icons the page uses, then a set for places and categories (config: icon, category; the
 # README lists them). Any other name shows as text, so an emoji works too.
 ICONS=(a-arrow-down a-arrow-up arrow-down arrow-left arrow-left-right arrow-right
-  arrow-up check chevron-left chevron-right clipboard-paste columns-2
+  arrow-up bell bell-off check chevron-left chevron-right clipboard-paste columns-2
   ellipsis history keyboard loader-circle lock panel-left pencil plus rotate-cw search settings
   square-terminal tag trash-2 unplug wifi-off x
   bitcoin book-open bot brain briefcase bug building-2 box chart-line cloud code coffee container

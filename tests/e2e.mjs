@@ -59,6 +59,17 @@ const row = (page, name, scope = '#sidebar') => page.locator(`${scope} .row`).fi
 try {
   // ---- desktop ----------------------------------------------------------------------------
   const ctx = await context({ viewport: { width: 1280, height: 800 } });
+  // Notifications: allowed (headless Chromium always says "denied"), and kept instead of shown.
+  await ctx.addInitScript(() => {
+    const kept = window.__notes = [];
+    const keep = (title, o) => kept.push({ title, body: o?.body, tag: o?.tag });
+    ServiceWorkerRegistration.prototype.showNotification = function (title, o) { keep(title, o); return Promise.resolve(); };
+    const Fake = function (title, o) { keep(title, o); };
+    Object.defineProperty(Fake, 'permission', { get: () => 'granted' });
+    Fake.requestPermission = () => Promise.resolve('granted');
+    window.Notification = /** @type {any} */ (Fake);
+  });
+  const notes = () => page.evaluate(() => /** @type {any} */ (window).__notes.map(n => `${n.title} · ${n.body}`));
   const page = await ctx.newPage();
   page.on('pageerror', e => check(`no page errors (${e.message})`, false));
   await page.goto(BASE);
@@ -168,12 +179,18 @@ try {
   check('a session that ends closes its pane, with a note', await until(async () => (await page.locator('#toast').textContent()).includes('renamed ended')),
     `toast: ${await page.locator('#toast').textContent()}; panes: ${await page.locator('#panes .pane').count()}; card: ${await page.locator('.term-card').allTextContents()}`);
 
+  const bell = page.locator('.side-foot button[aria-pressed]');
+  await bell.click();
+  check('the bell turns notifications on', await until(async () => (await bell.getAttribute('aria-pressed')) === 'true'));
   tmux('laptop', 'set-option', '-t', 'beta', '@hub-state', 'waiting');
-  check('a session that needs you gets a dot', await until(() => row(page, 'beta').locator('.st-waiting').isVisible(), 9000));
+  // No polling here: the event stream brings the change (the page's safety poll is every 30 s).
+  check('a session that needs you gets a dot, pushed to the page', await until(() => row(page, 'beta').locator('.st-waiting').isVisible(), 6000));
   check('... and a count in the title', (await page.title()).startsWith('(1)'));
+  check('... and a notification', await until(async () => (await notes()).includes('beta needs you · laptop')), (await notes()).join(' | '));
   tmux('laptop', 'set-option', '-t', 'beta', '@hub-state', 'done');
   tmux('laptop', 'set-option', '-t', 'beta', '@hub-state-at', String(Math.floor(Date.now() / 1000) + 5));
   check('a finished session you haven\'t seen gets a dot', await until(() => row(page, 'beta').locator('.st-done').isVisible(), 9000));
+  check('... and a notification', await until(async () => (await notes()).includes('beta is done · laptop')), (await notes()).join(' | '));
   await row(page, 'beta').locator('.row-main').click();
   check('... until you look at it', await until(async () => !(await row(page, 'beta').locator('.st-done').isVisible()), 9000));
 

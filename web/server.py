@@ -8,7 +8,8 @@ The list: each place is listed on its own (`terminal-hub --list KEY`), so a slow
 one never holds up the rest. A request lists again the places last listed over STALE_SECONDS
 ago, waits up to SOFT_WAIT for those answers, and otherwise answers with the last lists it has.
 ?fresh (every place) or ?fresh=KEY,KEY (after you changed something there) waits longer for
-lists that started after the request.
+lists that started after the request. /assets/events streams the list (server-sent events): a
+message whenever it changes, so an open page, even a hidden tab, hears of a change at once.
 
 The files: /v/VERSION/FILE is FILE, and install.sh puts the version (a hash of the files) in
 the page's URLs, so browsers may keep those for good. FILE.gz, when install.sh made one, goes to
@@ -23,6 +24,7 @@ DOWN_SECONDS = 15   # ... or this, for a place that was locked or unreachable la
 SOFT_WAIT = 0.8     # how long a request waits for those lists (a quick place answers in time)
 FRESH_WAIT = 4      # ... for ?fresh lists
 FIRST_WAIT = 6      # ... for places never listed yet
+EVENT_SECONDS = 2   # how often an event stream looks for a change
 CONFIG = os.environ.get("TERMINAL_HUB_CONFIG") or os.path.expanduser("~/.config/terminal-hub/config")
 
 state = threading.Condition()
@@ -160,10 +162,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if values is not None:
                 fresh = {k for v in values for k in v.split(",") if k} or True
             return self.reply(200, snapshot(fresh), "application/json", "no-store")
+        if path == "/events":
+            return self.events()
         forever = path.startswith("/v/")
         if forever:  # /v/VERSION/FILE
             path = "/" + path.split("/", 3)[3] if path.count("/") >= 3 else "/"
         self.file(path, forever)
+
+    def events(self):
+        """The list as server-sent events: a message when it changes, a comment now and then so a
+        dead connection shows up (the write fails and this thread ends)."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        last, idle = b"", 0.0
+        try:
+            while True:
+                body = snapshot()
+                if body != last:
+                    self.wfile.write(b"data: " + body + b"\n\n")
+                    last, idle = body, 0.0
+                elif idle >= 15:
+                    self.wfile.write(b": still here\n\n")
+                    idle = 0.0
+                self.wfile.flush()
+                time.sleep(EVENT_SECONDS)
+                idle += EVENT_SECONDS
+        except OSError:  # the page went away
+            pass
 
     def file(self, path, forever):
         rel = os.path.normpath(path.lstrip("/"))

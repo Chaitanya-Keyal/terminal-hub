@@ -8,7 +8,7 @@ import { keyBar } from './keys.js';
 
 const WIDE = matchMedia('(min-width: 900px)');
 const TOUCH = matchMedia('(pointer: coarse)');
-const POLL_MS = 5000;
+const POLL_MS = 30000;  // a safety net: the list arrives by the event stream (/assets/events)
 const MAX_PANES = 4;
 const KEEP_HIDDEN = { wide: 4, narrow: 1 };  // hidden terminals that stay connected
 const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/;  // as terminal-hub's: no leading - (a tmux option)
@@ -39,6 +39,8 @@ const S = {
   current: /** @type {string | null} */ (null),  // phones: the open session, or null for the home screen
   sidebar: store.get('sidebar', true),
   fontSize: store.get('fontSize', 15),
+  /** notifications on (and allowed by the browser) */
+  notify: store.get('notify', false) && typeof Notification === 'function' && Notification.permission === 'granted',
   /** @type {string[]} most recent first */
   recent: store.get('recent', []),
   /** @type {Record<string, number>} target → when you last had it on screen (for "done" dots) */
@@ -97,6 +99,7 @@ const brand = () => h('div', { class: 'brand' }, icon('square-terminal'), h('spa
 
 // ---- skeleton ----------------------------------------------------------------------------
 const ui = {
+  bell: h('button', { type: 'button', class: 'icon-btn', onclick: () => setNotify(!S.notify) }),
   side: h('aside', { id: 'sidebar' }), rail: h('aside', { id: 'rail' }),
   top: h('header', { id: 'topbar' }), home: h('section', { id: 'home' }),
   empty: h('section', { id: 'empty' }), panes: h('div', { id: 'panes' }),
@@ -132,6 +135,7 @@ ui.side.append(
     iconBtn('a-arrow-down', 'Smaller text', () => setFont(S.fontSize - 1)),
     iconBtn('a-arrow-up', 'Larger text', () => setFont(S.fontSize + 1)),
     h('span', { class: 'grow' }),
+    ui.bell,
     iconBtn('keyboard', 'Keyboard shortcuts', toggleHelp, 'help-toggle')),
 );
 ui.rail.append(iconBtn('panel-left', 'Show the list', () => setSidebar(true)));
@@ -552,14 +556,7 @@ function load(fresh = false) {
     let changed = false;
     try {
       const r = await fetch(`/assets/sessions.json${query}`, { cache: 'no-store' });
-      const text = r.ok ? await r.text() : '';
-      if (text && (text !== lastList || starting.size)) {
-        const list = JSON.parse(text);
-        lastList = text;
-        S.categories = list.categories ?? [];
-        S.places = withStarting(list.places);
-        changed = true;
-      }
+      changed = applyList(r.ok ? await r.text() : '');
     } catch { /* keep the last list */ }
     loading = null;
     if (!S.ready && S.places) firstList();
@@ -570,6 +567,85 @@ function load(fresh = false) {
       load(next);
     }
   })());
+}
+
+// A list from the server (JSON text), unless it's the one we have. True if it changed.
+function applyList(text) {
+  if (!text || (text === lastList && !starting.size)) return false;
+  const list = JSON.parse(text);
+  lastList = text;
+  S.categories = list.categories ?? [];
+  S.places = withStarting(list.places);
+  notifyChanges();
+  return true;
+}
+
+// The event stream: server.py sends the list whenever it changes. A hidden tab keeps it only
+// with notifications on.
+let events = null;
+function listen() {
+  if (events || typeof EventSource !== 'function') return;
+  events = new EventSource('/assets/events');
+  events.onmessage = e => {
+    try { if (!applyList(e.data)) return; } catch { return; }
+    if (!S.ready) firstList();
+    render();
+  };
+}
+function quiet() { events?.close(); events = null; }
+
+// ---- notifications --------------------------------------------------------------------------
+// With them on, a session that starts waiting for you, or finishes, raises one (unless it's on
+// screen in a focused window). A click opens the session.
+/** @type {Map<string, string> | null} target → "status statusAt", from the previous list */
+let lastStates = null;
+function notifyChanges() {
+  const before = lastStates;
+  lastStates = new Map();
+  for (const p of S.places ?? []) {
+    for (const s of p.sessions) {
+      const t = `${p.key}:${s.name}`, now = `${s.status} ${s.statusAt}`;
+      lastStates.set(t, now);
+      if (!before || !S.notify || s.starting || !before.has(t) || before.get(t) === now) continue;
+      if (document.visibilityState === 'visible' && document.hasFocus() && visible().includes(t)) continue;
+      if (s.status === 'waiting' && !before.get(t)?.startsWith('waiting')) show(t, `${s.name} needs you`, p.label);
+      else if (s.status === 'done') show(t, `${s.name} is done`, p.label);
+    }
+  }
+}
+
+async function show(t, title, body) {
+  const options = { body, tag: t, icon: '/assets/app-192.png', data: { target: t, url: `/?arg=${t}` } };
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();  // phones show them only this way
+    if (reg?.active) return await reg.showNotification(title, options);
+    const n = new Notification(title, options);
+    n.onclick = () => { window.focus(); openFromNotification(t); n.close(); };
+  } catch { /* not allowed after all */ }
+}
+
+function openFromNotification(t) {
+  if (exists(t)) openSession(t); else toast(`${nameOf(t)} has ended`);
+}
+
+async function setNotify(on) {
+  if (on) {
+    if (typeof Notification !== 'function') return toast("This browser can't show notifications (on an iPhone, add the hub to the home screen first)", 4500);
+    const answer = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+    if (answer !== 'granted') return toast("Notifications are blocked: allow them in this site's settings", 4500);
+  }
+  S.notify = on;
+  store.set('notify', on);
+  paintBell();
+  toast(on ? 'Notifications on' : 'Notifications off');
+  if (document.hidden && !on) quiet();
+}
+
+function paintBell() {
+  ui.bell.replaceChildren(icon(S.notify ? 'bell' : 'bell-off'));
+  ui.bell.title = S.notify ? 'Notifications on: turn off' : 'Notifications off: turn on';
+  ui.bell.setAttribute('aria-label', ui.bell.title);
+  ui.bell.setAttribute('aria-pressed', String(S.notify));
 }
 
 // Sessions you just created show up at once, with a spinner, until the list has them: the place
@@ -684,12 +760,19 @@ function openSettings() {
   const value = h('span', { class: 'value' }, String(S.fontSize));
   const step = d => { setFont(S.fontSize + d); value.textContent = S.fontSize; };
   const close = () => { sheet?.remove(); sheet = null; };
+  const toggle = h('button', {
+    type: 'button', class: 'switch', role: 'switch', 'aria-label': 'Notifications', 'aria-checked': String(S.notify),
+    onclick: async () => { await setNotify(!S.notify); toggle.setAttribute('aria-checked', String(S.notify)); },
+  });
   const wrap = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === wrap) close(); } },
     h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Settings' },
       h('div', { class: 'sheet-grip' }),
       h('div', { class: 'setting' }, h('span', {}, 'Text size'),
         h('div', { class: 'stepper' }, iconBtn('a-arrow-down', 'Smaller text', () => step(-1)), value,
-          iconBtn('a-arrow-up', 'Larger text', () => step(1))))));
+          iconBtn('a-arrow-up', 'Larger text', () => step(1)))),
+      h('div', { class: 'setting' },
+        h('span', {}, 'Notifications', h('small', {}, 'When a session needs you or finishes, while the hub is open')),
+        toggle)));
   sheet = wrap;
   document.body.append(wrap);
 }
@@ -924,9 +1007,14 @@ WIDE.addEventListener('change', () => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
+  if (document.hidden) { if (!S.notify) quiet(); return; }
+  listen();
   load();
   for (const v of views.values()) v.reconnectNow();
+});
+
+navigator.serviceWorker?.addEventListener('message', e => {
+  if (e.data?.hub === 'open' && typeof e.data.target === 'string' && e.data.target.includes(':')) openFromNotification(e.data.target);
 });
 
 // Phones: size the app to the visible area, so the key bar sits right above the keyboard.
@@ -953,7 +1041,10 @@ if (vv) {
   }
   history.replaceState({ hub: 'home' }, '', urlFor(wide() ? focused() : null));
   if (!wide() && S.current) history.pushState({ hub: 'session', target: S.current }, '', urlFor(S.current));
+  paintBell();
   render();
   load();
+  listen();
   setInterval(() => { if (!document.hidden) load(); }, POLL_MS);
+  navigator.serviceWorker?.register('/assets/sw.js', { scope: '/' }).catch(() => {});
 }
