@@ -119,8 +119,7 @@ function searchBox() {
     onkeydown: e => {
       if (e.key === 'Escape') { input.value = S.filter = ''; renderLists(); input.blur(); focusTerm(); }
       if (e.key === 'Enter') {
-        const first = ui.main.ownerDocument.querySelector(`#${wide() ? 'sidebar' : 'home'} .row-main`);
-        first?.click();
+        /** @type {HTMLElement | null} */ (document.querySelector(`#${wide() ? 'sidebar' : 'home'} .row-main`))?.click();
       }
     },
   });
@@ -536,11 +535,10 @@ function render() {
   renderTop();
   renderLists();
   renderEmpty();
-  for (const t of vis) if (S.seen[t] < now() - 2 || !S.seen[t]) markSeen(t);
-  const f0 = focused();
-  if (f0 && S.recent[0] !== f0) remember(f0);  // "last" follows what's actually on screen
-  const waiting = (S.places ?? []).flatMap(p => p.sessions).filter(s => s.status === 'waiting').length;
+  for (const t of vis) if ((S.seen[t] ?? 0) < now() - 2) markSeen(t);
   const f = focused();
+  if (f && S.recent[0] !== f) remember(f);  // "last" follows what's actually on screen
+  const waiting = (S.places ?? []).flatMap(p => p.sessions).filter(s => s.status === 'waiting').length;
   document.title = `${waiting ? `(${waiting}) ` : ''}${f ? `${nameOf(f)} · ` : ''}${APP}`;
   if (navigator.setAppBadge) (waiting ? navigator.setAppBadge(waiting) : navigator.clearAppBadge()).catch(() => {});
   if (w) {
@@ -613,9 +611,9 @@ function notifyChanges() {
   lastStates = new Map();
   for (const p of S.places ?? []) {
     for (const s of p.sessions) {
-      const t = `${p.key}:${s.name}`, now = `${s.status} ${s.statusAt}`;
-      lastStates.set(t, now);
-      if (!before || !S.notify || s.starting || !before.has(t) || before.get(t) === now) continue;
+      const t = `${p.key}:${s.name}`, state = `${s.status} ${s.statusAt}`;
+      lastStates.set(t, state);
+      if (!before || !S.notify || s.starting || !before.has(t) || before.get(t) === state) continue;
       if (document.visibilityState === 'visible' && document.hasFocus() && visible().includes(t)) continue;
       if (s.status === 'waiting' && !before.get(t)?.startsWith('waiting')) show(t, `${s.name} needs you`, p.label);
       else if (s.status === 'done') show(t, `${s.name} is done`, p.label);
@@ -768,12 +766,11 @@ function closeHelp() { help?.remove(); help = null; }
 function openSettings() {
   const value = h('span', { class: 'value' }, String(S.fontSize));
   const step = d => { setFont(S.fontSize + d); value.textContent = S.fontSize; };
-  const close = () => { sheet?.remove(); sheet = null; };
   const toggle = h('button', {
     type: 'button', class: 'switch', role: 'switch', 'aria-label': 'Notifications', 'aria-checked': String(S.notify),
     onclick: async () => { await setNotify(!S.notify); toggle.setAttribute('aria-checked', String(S.notify)); },
   });
-  const wrap = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === wrap) close(); } },
+  const wrap = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === wrap) closeSheet(); } },
     h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Settings' },
       h('div', { class: 'sheet-grip' }),
       h('div', { class: 'setting' }, h('span', {}, 'Text size'),
@@ -785,10 +782,11 @@ function openSettings() {
   sheet = wrap;
   document.body.append(wrap);
 }
+function closeSheet() { sheet?.remove(); sheet = null; }
 
 // ---- menus: a session's (rename, move, kill) and a page-made category's (edit, delete) ---------
 // A popover by the ⋯ button (or the pointer, for a right-click) on a desktop; a sheet on a phone.
-/** @typedef {{fill: (...kids: any[]) => void, item: (ic: string | Element, label: string, onclick: () => void, cls?: string) => HTMLElement, error: () => HTMLElement, focus: () => void}} MenuKit */
+/** @typedef {{fill: (...kids: any[]) => void, item: (ic: string | Element, label: string, onclick: () => void, cls?: string) => HTMLElement, error: () => HTMLElement, focus: () => void, confirm: (title: any, question: any[], label: string, run: () => Promise<string>) => void}} MenuKit */
 /** @param {Element | {x: number, y: number}} at @param {string} label @param {(kit: MenuKit) => void} build */
 function openMenu(at, label, build) {
   if (menu && menuAnchor === at) return closeMenu();  // its button again: a toggle
@@ -803,6 +801,21 @@ function openMenu(at, label, build) {
       typeof ic === 'string' ? icon(ic) : ic, h('span', {}, text)),
     error: () => h('div', { class: 'create-error', role: 'alert' }),
     focus: () => requestAnimationFrame(() => /** @type {HTMLElement | null} */ (body.querySelector('input, button'))?.focus()),
+    // A question with Cancel and a red LABEL button; run() does it and returns what went wrong, or ''.
+    confirm: (title, question, label, run) => {
+      const err = kit.error();
+      const go = h('button', {
+        type: 'button', class: 'btn danger',
+        onclick: async () => {
+          go.disabled = true;
+          err.textContent = await run();
+          go.disabled = false;
+        },
+      }, label);
+      kit.fill(title, h('p', { class: 'menu-text' }, ...question),
+        h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), go), err);
+      go.focus();
+    },
   };
   build(kit);
   kit.focus();
@@ -832,16 +845,22 @@ function openMenu(at, label, build) {
 
 /** @param {string} t @param {Element | {x: number, y: number}} at */
 function sessionMenu(t, at) {
-  openMenu(at, nameOf(t), ({ fill, item, error, focus }) => {
+  openMenu(at, nameOf(t), kit => {
+    const { fill, item, error, focus } = kit;
     const title = !wide() && h('div', { class: 'menu-title', style: `--c:${colourOf(t)}` },
       placeMark(placeOf(t)), h('b', {}, nameOf(t)), h('small', {}, labelOf(t)));
-    const kit = { fill, item, error, focus };
 
     const choose = () => fill(title,
       wide() && openable(t) && !visible().includes(t) && item('columns-2', 'Open in a new pane', () => { closeMenu(); openBeside(t); }),
       item('pencil', 'Rename', rename),
       item('tag', 'Move to category', pickCategory),
-      item('trash-2', 'Kill session', confirmKill, 'danger'));
+      item('trash-2', 'Kill session', () => kit.confirm(title, ['Kill ', h('b', {}, nameOf(t)), '? Everything running in it stops.'], 'Kill', async () => {
+        const r = await runHub(['--kill', t]);
+        if (!r.ok) return r.message || "Couldn't kill it.";
+        closeMenu();
+        killed(t);
+        return '';
+      }), 'danger'));
 
     const moveTo = async key => {
       const r = await runHub(['--category', t, key || '-']);
@@ -856,11 +875,11 @@ function sessionMenu(t, at) {
 
     const pickCategory = () => {
       const err = error();
-      const now = sessionOf(t)?.category ?? '';
+      const current = sessionOf(t)?.category ?? '';
       const choice = (markEl, label, key) => h('button', {
-        type: 'button', class: `menu-item${key === now ? ' current' : ''}`, role: 'menuitemradio',
-        'aria-checked': String(key === now), onclick: async () => { err.textContent = await moveTo(key); },
-      }, markEl ?? icon('tag'), h('span', {}, label), key === now && icon('check'));
+        type: 'button', class: `menu-item${key === current ? ' current' : ''}`, role: 'menuitemradio',
+        'aria-checked': String(key === current), onclick: async () => { err.textContent = await moveTo(key); },
+      }, markEl ?? icon('tag'), h('span', {}, label), key === current && icon('check'));
       fill(title,
         S.categories.map(c => choice(mark(c.icon), c.label, c.key)),
         S.categories.length > 0 && choice(icon('x'), 'No category', ''),
@@ -915,25 +934,6 @@ function sessionMenu(t, at) {
       input.select();
     };
 
-    const confirmKill = () => {
-      const err = error();
-      const kill = h('button', {
-        type: 'button', class: 'btn danger',
-        onclick: async () => {
-          kill.disabled = true;
-          const r = await runHub(['--kill', t]);
-          if (!r.ok) { kill.disabled = false; err.textContent = r.message || "Couldn't kill it."; return; }
-          closeMenu();
-          killed(t);
-        },
-      }, 'Kill');
-      fill(title,
-        h('p', { class: 'menu-text' }, 'Kill ', h('b', {}, nameOf(t)), '? Everything running in it stops.'),
-        h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), kill),
-        err);
-      kill.focus();
-    };
-
     choose();
   });
 }
@@ -957,27 +957,16 @@ function categoryMenu(c, at) {
       }));
       kit.focus();
     };
-    const confirmDelete = () => {
-      const err = kit.error();
-      const drop = h('button', {
-        type: 'button', class: 'btn danger',
-        onclick: async () => {
-          drop.disabled = true;
-          const r = await runHub(['--delete-category', c.key]);
-          if (!r.ok) { drop.disabled = false; err.textContent = r.message || "Couldn't delete it."; return; }
-          closeMenu();
-          S.categories = S.categories.filter(x => x !== c);
-          for (const p of S.places ?? []) for (const s of p.sessions) if (s.category === c.key) s.category = '';
-          render();
-          load(true);
-        },
-      }, 'Delete');
-      kit.fill(title,
-        h('p', { class: 'menu-text' }, 'Delete ', h('b', {}, c.label), '? Its sessions go back to their places.'),
-        h('div', { class: 'menu-actions' }, h('button', { type: 'button', class: 'btn', onclick: closeMenu }, 'Cancel'), drop),
-        err);
-      drop.focus();
-    };
+    const confirmDelete = () => kit.confirm(title, ['Delete ', h('b', {}, c.label), '? Its sessions go back to their places.'], 'Delete', async () => {
+      const r = await runHub(['--delete-category', c.key]);
+      if (!r.ok) return r.message || "Couldn't delete it.";
+      closeMenu();
+      S.categories = S.categories.filter(x => x !== c);
+      for (const p of S.places ?? []) for (const s of p.sessions) if (s.category === c.key) s.category = '';
+      render();
+      load(true);
+      return '';
+    });
     kit.fill(title, kit.item('pencil', 'Rename, or change its icon', edit), kit.item('trash-2', 'Delete category', confirmDelete, 'danger'));
   });
 }
@@ -1099,8 +1088,7 @@ addEventListener('keydown', e => {
     e.stopPropagation();
     closeMenu();
     closeHelp();
-    sheet?.remove();
-    sheet = null;
+    closeSheet();
     return modal?.close();
   }
   if (!wide() || !e.altKey || e.ctrlKey || e.metaKey) return;

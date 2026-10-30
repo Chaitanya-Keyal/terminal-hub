@@ -20,7 +20,8 @@
 #
 # When a session closes, the attach tells the page why, with a private OSC 7766 sequence that
 # other terminals ignore: "detached", "ended", or "lost" (the connection to the place dropped).
-# --rename and --kill answer the same way: "ok", or "failed;MESSAGE".
+# The page's commands (--rename, --kill, the category ones) answer the same way: "ok[;MESSAGE]"
+# or "failed;MESSAGE".
 #
 # install.sh copies this to ~/.local/bin; edit the copy in the repo.
 set -u
@@ -28,6 +29,17 @@ CONFIG=${TERMINAL_HUB_CONFIG:-$HOME/.config/terminal-hub/config}
 RUN=${XDG_RUNTIME_DIR:-/tmp}/terminal-hub-$(id -u)
 
 die() { echo "terminal-hub: $*" >&2; exit 1; }
+# index_of VALUE ITEMS...: the index of VALUE among ITEMS, or fail.
+index_of() {
+  local v=$1 i=0 x
+  shift
+  for x; do [[ $x == "$v" ]] && echo "$i" && return 0; i=$((i + 1)); done
+  return 1
+}
+# Session names the hub attaches to and creates (they go into shell code unquoted), and category
+# keys. Not starting with -, which tmux would take for an option.
+NAME_RE='^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$'
+NAME_RULE="use 1-32 letters, digits, - and _ (not starting with -)"
 
 # The config (see config.example) calls these.
 KEY=() LABEL=() COLOUR=() KIND=() ARGS=()
@@ -40,7 +52,7 @@ declare -A ICON=()
 icon() { ICON[$1]=${2:-}; }  # icon KEY NAME: place KEY's icon (a Lucide name, or an emoji)
 CAT_KEY=() CAT_LABEL=() CAT_ICON=() CAT_PATS=() CAT_PAGE=()
 category() {  # category KEY LABEL ICON [PATTERN...]
-  [[ $1 =~ ^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$ ]] || die "category key '$1' in $CONFIG: use letters, digits, - and _"
+  [[ $1 =~ $NAME_RE ]] || die "category key '$1' in $CONFIG: $NAME_RULE"
   local IFS=$'\n'
   CAT_KEY+=("$1") CAT_LABEL+=("${2:-$1}") CAT_ICON+=("${3:-}") CAT_PATS+=("${*:4}") CAT_PAGE+=(0)
 }
@@ -51,14 +63,10 @@ category() {  # category KEY LABEL ICON [PATTERN...]
 # Categories made on the page live in a data file next to the config (never run as code), one
 # per line: KEY, LABEL, ICON ("-" for none), then patterns, tab-separated. The config's come first.
 CATS=${CONFIG%/*}/categories
-category_index() {  # category_index KEY: the category's index, or fail
-  local c
-  for c in "${!CAT_KEY[@]}"; do [[ ${CAT_KEY[c]} == "$1" ]] && echo "$c" && return 0; done
-  return 1
-}
+category_index() { index_of "$1" "${CAT_KEY[@]}"; }  # category_index KEY: its index, or fail
 if [[ -f $CATS ]]; then
   while IFS=$'\t' read -r -a f; do
-    if [[ ! ${f[0]:-} =~ ^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$ ]] || category_index "${f[0]}" >/dev/null; then continue; fi
+    if [[ ! ${f[0]:-} =~ $NAME_RE ]] || category_index "${f[0]}" >/dev/null; then continue; fi
     [[ ${f[2]:--} == - ]] && f[2]=''
     category "${f[@]:0:3}" "${f[@]:3}"
     CAT_PAGE[-1]=1
@@ -111,7 +119,7 @@ category_of() {
   local c pat target
   CAT=''
   if [[ -n $4 ]]; then
-    for c in "${!CAT_KEY[@]}"; do [[ ${CAT_KEY[c]} == "$4" ]] && CAT=$4 && return; done
+    category_index "$4" >/dev/null && CAT=$4 && return
     [[ $4 == - ]] && return
   fi
   for c in "${!CAT_KEY[@]}"; do
@@ -150,11 +158,7 @@ cmd_list() {
   return 0
 }
 
-find_place() {
-  local i
-  for i in "${!KEY[@]}"; do [[ ${KEY[i]} == "$1" ]] && echo "$i" && return 0; done
-  return 1
-}
+find_place() { index_of "$1" "${KEY[@]}"; }
 
 # Shell code, run in the place, that attaches to session $1 (creating it in that user's home:
 # $HOME expands there), then says why it closed: it looks the session up by id, which survives a
@@ -201,10 +205,6 @@ target() {
   NAME=${1#*:}
   I=$(find_place "${1%%:*}")
 }
-# Names the hub attaches to and creates; they go into shell code unquoted.
-# Not starting with -, which tmux would take for an option.
-NAME_RE='^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$'
-NAME_RULE="use 1-32 letters, digits, - and _ (not starting with -)"
 
 # go NAME | KEY:NAME | KEY:new [existing]
 go() {
@@ -240,23 +240,25 @@ answer() {
   exit 0
 }
 
-# An existing session's name may be anything tmux allows (it's quoted); a new one follows NAME_RE.
+# session KEY:NAME: sets I and NAME for the page's session commands, or answers why not. An
+# existing session's name may be anything tmux allows (it's quoted); a new one follows NAME_RE.
+session() {
+  target "$1" || answer 1 "no place called ${1%%:*}"
+  [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
+}
+
 cmd_rename() {
   local out
-  target "${1:-}" || answer 1 "no place called ${1%%:*}"
-  [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
+  session "${1:-}"
   [[ ${2:-} =~ $NAME_RE ]] || answer 1 "the new name: $NAME_RULE"
   out=$(in_place "$I" "tmux rename-session -t $(q "=$NAME") $2" 2>&1) || answer 1 "$out"
   answer 0
 }
 
 cmd_category() {
-  local out c ok=0
-  target "${1:-}" || answer 1 "no place called ${1%%:*}"
-  [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
-  [[ ${2:-} == - ]] && ok=1
-  for c in "${CAT_KEY[@]}"; do [[ $c == "${2:-}" ]] && ok=1; done
-  ((ok)) || answer 1 "no category called '${2:-}'"
+  local out
+  session "${1:-}"
+  [[ ${2:-} == - ]] || category_index "${2:-}" >/dev/null || answer 1 "no category called '${2:-}'"
   out=$(in_place "$I" "tmux set-option -t $(q "=$NAME:") @hub-category $2" 2>&1) || answer 1 "$out"
   answer 0
 }
@@ -329,8 +331,7 @@ cmd_delete_category() {
 
 cmd_kill() {
   local out
-  target "${1:-}" || answer 1 "no place called ${1%%:*}"
-  [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
+  session "${1:-}"
   out=$(in_place "$I" "tmux kill-session -t $(q "=$NAME")" 2>&1) || answer 1 "$out"
   answer 0
 }
@@ -421,7 +422,7 @@ case ${1:-} in
   --rename) cmd_rename "${2:-}" "${3:-}" ;;
   --kill) cmd_kill "${2:-}" ;;
   --check) cmd_check ;;
-  -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
   '') cmd_pick ;;
   -*) die "unknown option $1 (see terminal-hub --help)" ;;
   *) go "$1" ;;
