@@ -4,7 +4,7 @@ Every tmux session on your machines, in one web page that works on a phone and o
 
 terminal-hub lists the tmux sessions of every machine you give it (this one, others over ssh,
 other users on either) and opens any of them in a real terminal: side by side on a desktop, one
-at a time with a key bar on a phone. Coding agents like Claude Code get a dot that says whether
+at a time with a key bar on a phone. Coding agents (Claude Code, OpenCode) get a dot that says whether
 they're working, waiting for you, or done. It runs on one machine, you reach it privately over
 your tailnet, and there's nothing to build: plain JavaScript, a bash script and a small Python
 server around [ttyd](https://github.com/tsl0922/ttyd) and [xterm.js](https://xtermjs.org).
@@ -205,16 +205,27 @@ finishing its work doesn't hide a question the main agent is asking you. Outside
 nothing. One gap: Claude Code has no hook for interrupting it with Esc, so after that the dot stays
 blue until your next message.
 
+**OpenCode** (v2) sets them through a small plugin that runs in its terminal window, so it knows
+its tmux pane even when OpenCode's server is the shared background service. install.sh puts it in
+`~/.local/share/terminal-hub/opencode`; list that folder, with its full path, in
+`~/.config/opencode/cli.json` (create the file if you have none):
+
+```json
+{ "plugins": ["/home/you/.local/share/terminal-hub/opencode"] }
+```
+
+The dot is working while one of the window's tabs is busy, waiting when one asks for a permission
+or a question, done when they finish, and cleared when you stop one with Esc or close OpenCode.
+
 Agents on other machines need `hub-state` there: copy `bin/hub-state` to `~/.local/bin/` on that
-machine.
+machine (and, for OpenCode, the plugin folder).
 
 **Notifications.** The bell at the bottom of the sidebar (on a phone: the gear, then
 Notifications) asks the browser to allow them. Then a session that starts waiting for you, or
 finishes, raises a notification, unless it's on your screen; clicking it opens the session. They
 come while the hub is open, in any tab or window: a browser can't run a page that's closed, so a
 phone gets them while the app is open or just in the background. On an iPhone, add the hub to the
-home screen first (Safari offers notifications only to installed apps). OpenCode isn't supported yet: its plugins run in a shared background process, so they
-can't tell which terminal an event belongs to.
+home screen first (Safari offers notifications only to installed apps).
 
 ## share
 
@@ -265,6 +276,11 @@ restarts ttyd, and open pages reconnect.
 - **Swiping doesn't scroll:** turn on tmux mouse mode (the hub's tmux settings do).
 - **"Notifications are blocked":** the browser was told no once; allow notifications in the
   site's settings (the lock or tune icon next to the address), then turn the bell on again.
+- **No notifications, though they're allowed:** turning the bell on shows a sample. If even that
+  doesn't appear, the system hides the browser's notifications: on Windows, check Settings →
+  System → Notifications for your browser, and Do not disturb. A browser that forgets the
+  permission when it closes (Edge: "Choose what to clear every time you close the browser", Site
+  permissions) turns the bell off again on the next visit.
 
 ## Where things go
 
@@ -273,7 +289,7 @@ restarts ttyd, and open pages reconnect.
 | `~/.config/terminal-hub/config` | your settings |
 | `~/.local/bin/terminal-hub` | lists sessions and attaches to them (ttyd runs it) |
 | `~/.local/bin/hub-state`, `share` | the status dots, and `share` |
-| `~/.local/share/terminal-hub/` | the page, `server.py` and the tmux settings |
+| `~/.local/share/terminal-hub/` | the page, `server.py`, the tmux settings and the OpenCode plugin |
 | `~/.config/systemd/user/terminal-hub.service` | ttyd |
 | `~/.config/systemd/user/terminal-hub-assets.service` | `server.py` |
 

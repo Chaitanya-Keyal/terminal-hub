@@ -6,7 +6,8 @@
 #   ./install.sh --no-services   install the files only (tests, containers); run ttyd and
 #                                web/server.py yourself, as in systemd/*.service
 #
-# Puts terminal-hub, share and hub-state in ~/.local/bin and the page in ~/.local/share/terminal-hub,
+# Puts terminal-hub, share and hub-state in ~/.local/bin and the page (and the OpenCode plugin) in
+# ~/.local/share/terminal-hub,
 # and runs two systemd user services: ttyd (the page and its terminals) on 127.0.0.1:7682, and
 # server.py (the page's files and the session list) on 127.0.0.1:7683. Publishing them, for example
 # with `tailscale serve`, is up to you: see README.md.
@@ -37,7 +38,8 @@ case ${1:-} in
     rm -rf "$SHARE"
     echo "terminal-hub removed. Your config is still in $CONFIG."
     echo "Also remove: the tailscale serve paths (tailscale serve --set-path / off, and /assets),"
-    echo "the source-file line in ~/.tmux.conf, and any agent hooks that call hub-state."
+    echo "the source-file line in ~/.tmux.conf, any agent hooks that call hub-state, and the"
+    echo "terminal-hub entry in ~/.config/opencode/cli.json."
     exit 0
     ;;
   *) echo "usage: ./install.sh [--pull | --uninstall | --no-services]" >&2; exit 2 ;;
@@ -147,6 +149,8 @@ restart_assets=0
 cmp -s web/server.py "$SHARE/server.py" || restart_assets=1
 cp web/server.py "$SHARE/"
 cp tmux/hub.conf "$SHARE/tmux.conf"
+mkdir -p "$SHARE/opencode"
+cp integrations/opencode/tui.js "$SHARE/opencode/"  # the OpenCode plugin (README: Agent status)
 rm -f "$SHARE/serve-assets.py"  # left by older versions
 
 if ((!services)); then
