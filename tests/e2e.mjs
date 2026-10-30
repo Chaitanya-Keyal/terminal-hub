@@ -250,10 +250,10 @@ try {
   const hub2 = await startHub({
     places: [{ key: 'laptop', label: 'laptop', colour: '#7ee787' }, { key: 'server', label: 'server', colour: '#ff7b72' }],
     extraConfig: [`place slow slow '#d2a8ff' via ${extra}/slow.sh`, 'icon laptop laptop', 'icon server 🚀',
-      `category work Work briefcase '*/work/*'`, `category bots Bots bot 'server:bot*'`],
+      `category work Work briefcase '*/hub-e2e-work/*'`  // not */work/*: CI's temp folder is under /work/, `category bots Bots bot 'server:bot*'`],
   });
   try {
-    const workDir = join(hub2.home, 'home-laptop', 'work', 'api');
+    const workDir = join(hub2.home, 'home-laptop', 'hub-e2e-work', 'api');
     mkdirSync(workDir, { recursive: true });
     hub2.tmux('laptop', 'new-session', '-d', '-s', 'api', '-c', workDir);
     hub2.tmux('laptop', 'new-session', '-d', '-s', 'notes');
