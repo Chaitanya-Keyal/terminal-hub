@@ -5,7 +5,7 @@
 #
 # With a command, the session runs just that command and closes when it exits, e.g.
 #   share -- claude          (a shell function like `cc() { share -- claude "$@"; }` saves typing)
-name= cmd=()
+name='' cmd=()
 if [[ -n ${1:-} && $1 != -- ]]; then name=$1; shift; fi
 [[ ${1:-} == -- ]] && { shift; cmd=("$@"); }
 
@@ -14,8 +14,10 @@ if [ -n "$TMUX" ]; then
   echo "already shared as tmux session: $(tmux display-message -p '#S')"
   exit 0
 fi
+# The hub opens names of up to 32 letters, digits, - and _ (28 leaves room for a -2 suffix).
 base=${name:-$(basename "$PWD")}
-base=${base//[.:]/_}
+base=${base//[^A-Za-z0-9_-]/_}
+base=${base:0:28}
 name=$base i=2
 while tmux has-session -t "=$name" 2>/dev/null; do name="$base-$((i++))"; done
 
