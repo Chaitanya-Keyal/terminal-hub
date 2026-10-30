@@ -12,8 +12,8 @@ export function keyBar(el, { view, ctrl }) {
   /** @type {{label?: string, icon?: string, title: string, send?: (v: TermView) => string, repeat?: boolean, toggle?: boolean, paste?: boolean}[]} */
   const keys = [
     { label: 'esc', send: () => '\x1b', title: 'Escape' },
-    { icon: 'arrow-right-to-line', send: () => '\t', title: 'Tab' },
-    { icon: 'arrow-left-to-line', send: () => '\x1b[Z', title: 'Shift+Tab' },
+    { label: 'tab', send: () => '\t', title: 'Tab' },
+    { label: '⇧tab', send: () => '\x1b[Z', title: 'Shift+Tab' },
     { label: 'ctrl', toggle: true, title: 'Ctrl (applies to the next key)' },
     { label: '^C', send: () => '\x03', title: 'Ctrl+C' },
     { icon: 'arrow-left', send: v => v.arrow('D'), repeat: true, title: 'Left' },

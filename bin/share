@@ -18,6 +18,7 @@ fi
 base=${name:-$(basename "$PWD")}
 base=${base//[^A-Za-z0-9_-]/_}
 base=${base:0:28}
+[[ $base == -* ]] && base=_${base:1}  # tmux would take a leading - for an option
 name=$base i=2
 while tmux has-session -t "=$name" 2>/dev/null; do name="$base-$((i++))"; done
 

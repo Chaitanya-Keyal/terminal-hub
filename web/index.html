@@ -11,21 +11,33 @@
 <link rel="manifest" href="/assets/app.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/assets/app-32.png">
 <link rel="apple-touch-icon" href="/assets/app-192.png">
-<link rel="preload" href="/assets/FiraCodeNF.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/vendor/xterm.css">
-<link rel="stylesheet" href="/assets/app.css">
 <script type="importmap">
 {
   "imports": {
-    "@xterm/xterm": "/assets/vendor/xterm.mjs",
-    "@xterm/addon-fit": "/assets/vendor/addon-fit.mjs",
-    "@xterm/addon-webgl": "/assets/vendor/addon-webgl.mjs",
-    "@xterm/addon-unicode11": "/assets/vendor/addon-unicode11.mjs",
-    "@xterm/addon-web-links": "/assets/vendor/addon-web-links.mjs"
+    "@xterm/xterm": "@LIB@/vendor/xterm.mjs",
+    "@xterm/addon-fit": "@LIB@/vendor/addon-fit.mjs",
+    "@xterm/addon-webgl": "@LIB@/vendor/addon-webgl.mjs",
+    "@xterm/addon-unicode11": "@LIB@/vendor/addon-unicode11.mjs",
+    "@xterm/addon-web-links": "@LIB@/vendor/addon-web-links.mjs"
   }
 }
 </script>
-<script type="module" src="/assets/app.js"></script>
+<!-- install.sh fills in two /assets/v/HASH prefixes, one for the libraries and font, one for the
+     page's own files: what's under them never changes, so browsers keep it, and updating the page
+     doesn't fetch the libraries again. Preloading fetches every module at once. -->
+<style>@font-face { font-family: "FiraCode NF"; src: url(@LIB@/FiraCodeNF.woff2) format("woff2"); font-display: block; }</style>
+<link rel="preload" href="@LIB@/FiraCodeNF.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="@LIB@/vendor/xterm.css">
+<link rel="stylesheet" href="@APP@/app.css">
+<link rel="modulepreload" href="@APP@/term.js">
+<link rel="modulepreload" href="@APP@/keys.js">
+<link rel="modulepreload" href="@APP@/icons.js">
+<link rel="modulepreload" href="@LIB@/vendor/xterm.mjs">
+<link rel="modulepreload" href="@LIB@/vendor/addon-fit.mjs">
+<link rel="modulepreload" href="@LIB@/vendor/addon-webgl.mjs">
+<link rel="modulepreload" href="@LIB@/vendor/addon-unicode11.mjs">
+<link rel="modulepreload" href="@LIB@/vendor/addon-web-links.mjs">
+<script type="module" src="@APP@/app.js"></script>
 @SERVICE_WORKER@
 </head>
 <body>

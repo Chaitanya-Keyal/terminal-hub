@@ -86,7 +86,7 @@ export async function startHub({ places, extraConfig = [], homeFiles = {} }) {
     rmSync(home, { recursive: true, force: true });
   }
 
-  return { base, home, tmux, context, close };
+  return { base, assets: `http://127.0.0.1:${assetPort}`, home, tmux, context, close };
 }
 
 export async function launch() {

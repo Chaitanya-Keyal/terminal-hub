@@ -7,6 +7,9 @@
 // Needs ttyd, tmux and python3. PLAYWRIGHT (a path to playwright's index.mjs) and CHROMIUM (a
 // browser executable) override the defaults.
 import http from 'node:http';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { startHub, launch, until, sleep } from './harness.mjs';
 
 let failures = 0;
@@ -238,6 +241,87 @@ try {
   await phone.locator('.stepper .icon-btn').last().tap();
   check('phone: settings change the text size', await until(async () => Number(await phone.locator('.stepper .value').textContent()) === Number(before) + 1));
   await pctx.close();
+
+  // ---- categories, icons, and a slow place: a second hub with its own config ----------------
+  const extra = mkdtempSync(join(tmpdir(), 'hub-slow-'));
+  mkdirSync(join(extra, 'tmux'), { mode: 0o700 });
+  writeFileSync(join(extra, 'slow.sh'), `#!/bin/bash\n[ -e ${extra}/slow ] && sleep 3\n` +
+    `exec env -u TMUX -u TMUX_PANE TMUX_TMPDIR=${extra}/tmux HOME=${extra} bash -c "$1"\n`, { mode: 0o755 });
+  const hub2 = await startHub({
+    places: [{ key: 'laptop', label: 'laptop', colour: '#7ee787' }, { key: 'server', label: 'server', colour: '#ff7b72' }],
+    extraConfig: [`place slow slow '#d2a8ff' via ${extra}/slow.sh`, 'icon laptop laptop', 'icon server 🚀',
+      `category work Work briefcase '*/work/*'`, `category bots Bots bot 'server:bot*'`],
+  });
+  try {
+    const workDir = join(hub2.home, 'home-laptop', 'work', 'api');
+    mkdirSync(workDir, { recursive: true });
+    hub2.tmux('laptop', 'new-session', '-d', '-s', 'api', '-c', workDir);
+    hub2.tmux('laptop', 'new-session', '-d', '-s', 'notes');
+    hub2.tmux('server', 'new-session', '-d', '-s', 'bot1');
+    hub2.tmux('server', 'new-session', '-d', '-s', 'logs');
+    const ctx2 = await hub2.context(browser, { viewport: { width: 1280, height: 800 } });
+    const pg = await ctx2.newPage();
+    pg.on('pageerror', e => check(`no page errors with categories (${e.message})`, false));
+    await pg.goto(hub2.base);
+    const order = async () => (await pg.locator('#sidebar .group-name').allTextContents()).join();
+    const group = name => pg.locator('#sidebar .group').filter({ has: pg.locator('.group-name', { hasText: new RegExp(`^${name}$`) }) });
+    check('categories come first, then the places', await until(async () => (await order()) === 'Work,Bots,laptop,server,slow'), await order());
+    check('a folder rule puts a session in its category, which shows its place',
+      await group('Work').locator('.row', { hasText: 'api' }).locator('.row-place', { hasText: 'laptop' }).isVisible());
+    check('its place keeps the other sessions', (await group('laptop').locator('.row-name').allTextContents()).join() === 'notes');
+    check('places show their icons: a Lucide one, or an emoji',
+      (await group('laptop').locator('.group-head .pmark svg').count()) === 1 && (await group('server').locator('.group-head .emoji').textContent()) === '🚀');
+
+    await group('Work').locator('.group-toggle').click();
+    check('a group collapses to a count', await until(async () =>
+      !(await group('Work').locator('.row').count()) && (await group('Work').locator('.group-count').textContent()) === '1'));
+    await pg.reload();
+    check('... and stays collapsed after a reload', await until(async () => (await group('Work').locator('.group-toggle').getAttribute('aria-expanded')) === 'false'));
+    await group('Work').locator('.group-toggle').click();
+    await group('laptop').locator('.group-toggle').focus();
+    await pg.keyboard.press('Enter');
+    check('collapsing from the keyboard keeps the focus on the group', await until(async () =>
+      (await group('laptop').locator('.group-toggle').getAttribute('aria-expanded')) === 'false'
+        && await pg.evaluate(() => document.activeElement?.getAttribute('data-k')) === 'p:laptop'));
+    await group('laptop').locator('.icon-btn.add').click();
+    check('"+" on a collapsed place opens it, with the name field', await until(() => pg.locator('.create-input').evaluate(el => el === document.activeElement)));
+    await pg.keyboard.press('Escape');
+
+    const menuFor = async name => {
+      const r = pg.locator('#sidebar .row').filter({ has: pg.locator('.row-name', { hasText: new RegExp(`^${name}$`) }) });
+      await r.hover();
+      await r.locator('.row-more').click();
+      await pg.locator('.menu .menu-item', { hasText: 'Move to category' }).click();
+    };
+    await menuFor('notes');
+    await pg.locator('.menu .menu-item', { hasText: 'Work' }).click();
+    check('the ⋯ menu moves a session into a category', await until(async () => (await group('Work').locator('.row-name').allTextContents()).join() === 'api,notes'));
+    await menuFor('bot1');
+    await pg.locator('.menu .menu-item', { hasText: 'No category' }).click();
+    check('... and "No category" takes one out, even one a rule put in', await until(async () =>
+      (await order()) === 'Work,laptop,server,slow' && (await group('server').locator('.row-name').allTextContents()).join() === 'bot1,logs')
+      && hub2.tmux('server', 'show-options', '-v', '-t', '=bot1:', '@hub-category') === '-', await order());
+
+    writeFileSync(join(extra, 'slow'), '');  // the slow place now takes 3 s to answer
+    await sleep(2500);                       // so every list is stale
+    const ms = await pg.evaluate(async () => { const t = performance.now(); await fetch('/assets/sessions.json', { cache: 'no-store' }); return performance.now() - t; });
+    check("a slow place doesn't hold up the list", ms < 1500, `${Math.round(ms)} ms`);
+    rmSync(join(extra, 'slow'));
+
+    const src = await pg.locator('script[type=module][src]').getAttribute('src') ?? '';
+    const res = await fetch(hub2.assets + src.replace(/^\/assets/, ''), { headers: { 'Accept-Encoding': 'gzip' } });
+    check("the page's files have versioned URLs that browsers keep, gzipped",
+      /^\/assets\/v\/[0-9a-f]{12}\/app\.js$/.test(src) && /immutable/.test(res.headers.get('cache-control') ?? '')
+        && res.headers.get('content-encoding') === 'gzip' && (await res.text()).includes('function render'), src);
+
+    const pctx2 = await hub2.context(browser, { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true });
+    const ph = await pctx2.newPage();
+    await ph.goto(hub2.base);
+    check('phone: categories head the home screen too', await until(async () => (await ph.locator('#home .group-name').first().textContent()) === 'Work'));
+  } finally {
+    hub2.close();
+    rmSync(extra, { recursive: true, force: true });
+  }
 } finally {
   await browser.close();
   hub.close();

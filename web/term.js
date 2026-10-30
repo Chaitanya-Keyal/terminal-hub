@@ -83,6 +83,7 @@ export class TermView {
     this.status = 'connecting';  // connecting | open | reconnecting | detached | ended | unlocked | failed
     this.reason = '';            // why the last connection closed, from the attach (OSC 7766)
     this.retries = 0;
+    this.connecting = false;  // waiting for the auth token, before the socket exists
     this.fitFrame = 0;
     this.lastUsed = 0;  // for the page's keep-the-recent-ones-connected rule
     this.written = 0;
@@ -151,11 +152,15 @@ export class TermView {
   }
 
   async connect() {
+    if (this.connecting) return;  // two quick calls (a phone waking up) would attach twice
     clearTimeout(this.retryTimer);
     this.reason = '';
     this.setStatus(this.retries ? 'reconnecting' : 'connecting');
+    this.connecting = true;
     const token = await authToken();
+    this.connecting = false;
     if (this.disposed) return;
+    this.ws?.close();
     const ws = new WebSocket(wsUrl(this.connections++ ? this.again : this.args), ['tty']);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
@@ -171,7 +176,7 @@ export class TermView {
       this.write(d.subarray(1));
       if (this.quiet) { this.quiet = false; this.hooks.attached?.(this); }
     };
-    ws.onclose = () => this.closed();
+    ws.onclose = () => { if (this.ws === ws) this.closed(); };
     this.ws = ws;
   }
 

@@ -2,7 +2,7 @@
 // by side. Phones: a home screen with the list, then one terminal with a top bar and key bar.
 // Every terminal is its own connection to ttyd (term.js); the last few hidden ones stay
 // connected, so switching back is instant. The list comes from /assets/sessions.json.
-import { icon } from './icons.js';
+import { icon, hasIcon } from './icons.js';
 import { TermView, MAC, runHub } from './term.js';
 import { keyBar } from './keys.js';
 
@@ -11,12 +11,15 @@ const TOUCH = matchMedia('(pointer: coarse)');
 const POLL_MS = 5000;
 const MAX_PANES = 4;
 const KEEP_HIDDEN = { wide: 4, narrow: 1 };  // hidden terminals that stay connected
-const NAME_RE = /^[A-Za-z0-9_-]{1,32}$/;
+const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/;  // as terminal-hub's: no leading - (a tmux option)
 const APP = document.title;
 const STATUS = { working: 'Working', waiting: 'Needs you', done: 'Done' };
 
-/** @typedef {{name: string, windows: number, attached: number, status: '' | 'working' | 'waiting' | 'done', statusAt: number, prefix?: string, starting?: boolean}} Session */
-/** @typedef {{key: string, label: string, colour: string, state: 'ok' | 'locked' | 'unreachable', sessions: Session[]}} Place */
+/** @typedef {{name: string, windows: number, attached: number, status: '' | 'working' | 'waiting' | 'done', statusAt: number, prefix?: string, category?: string, starting?: boolean}} Session */
+/** @typedef {{key: string, label: string, colour: string, icon?: string, state: 'ok' | 'locked' | 'unreachable' | 'pending', sessions: Session[]}} Place */
+/** @typedef {{key: string, label: string, icon?: string}} Category */
+/** @typedef {{p: Place, s: Session}} Item */
+/** @typedef {{id: string, key: string, label: string, category: Category | null, place: Place | null, items: Item[]}} Group */
 
 const store = {
   get(key, fallback) {
@@ -27,6 +30,9 @@ const store = {
 
 const S = {
   places: /** @type {Place[] | null} */ (null),
+  categories: /** @type {Category[]} */ ([]),
+  /** @type {Set<string>} collapsed groups: "c:KEY" (a category) or "p:KEY" (a place) */
+  collapsed: new Set(store.get('collapsed', [])),
   /** @type {string[]} targets ("KEY:NAME") in the panes, on wide screens */
   panes: store.get('panes', []).filter(t => typeof t === 'string' && t.includes(':')).slice(0, MAX_PANES),
   focus: store.get('focus', 0),
@@ -64,7 +70,7 @@ const openable = t => NAME_RE.test(nameOf(t));
 const visible = () => (wide() ? S.panes : S.current ? [S.current] : []);
 const focused = () => (wide() ? S.panes[S.focus] ?? null : S.current);
 const focusedView = () => { const f = focused(); return f ? views.get(f) : undefined; };
-const allTargets = () => (S.places ?? []).flatMap(p => p.sessions.map(s => `${p.key}:${s.name}`)).filter(openable);
+const allTargets = () => groups().flatMap(g => g.items.map(({ p, s }) => `${p.key}:${s.name}`)).filter(openable);
 const lastTarget = () => S.recent.find(t => t !== focused() && exists(t));
 const colourOf = t => placeOf(t)?.colour ?? 'var(--muted)';
 const labelOf = t => placeOf(t)?.label ?? keyOf(t);
@@ -140,55 +146,118 @@ const bar = keyBar(ui.keys, {
 });
 
 // ---- the session list ----------------------------------------------------------------------
+// The list's groups, in order: the categories that have sessions, then every place with its
+// sessions that aren't in one.
+/** @returns {Group[]} */
+function groups() {
+  const places = S.places ?? [];
+  /** @type {Map<string, Item[]>} */
+  const byCategory = new Map(S.categories.map(c => [c.key, []]));
+  /** @type {Map<string, Item[]>} */
+  const byPlace = new Map(places.map(p => [p.key, []]));
+  for (const p of places) {
+    for (const s of p.sessions) ((s.category && byCategory.get(s.category)) || byPlace.get(p.key))?.push({ p, s });
+  }
+  const items = (map, key) => map.get(key) ?? [];
+  return [
+    ...S.categories.filter(c => items(byCategory, c.key).length)
+      .map(c => ({ id: `c:${c.key}`, key: c.key, label: c.label, category: c, place: null, items: items(byCategory, c.key) })),
+    ...places.map(p => ({ id: `p:${p.key}`, key: p.key, label: p.label, category: null, place: p, items: items(byPlace, p.key) })),
+  ];
+}
+
 function placeItems() {
   if (!S.places) return [h('div', { class: 'note' }, 'Loading…')];
   if (!S.places.length) return [h('div', { class: 'note' }, 'No places in the config.')];
   const q = S.filter.trim().toLowerCase();
   const out = [];
-  for (const p of S.places) {
-    const placeHit = !q || p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q);
-    const sessions = placeHit ? p.sessions : p.sessions.filter(s => s.name.toLowerCase().includes(q));
-    if (!placeHit && !sessions.length) continue;
-    out.push(h('section', { class: 'place', style: `--c:${p.colour}` },
-      placeHead(p),
-      S.creating === p.key && createEl,
-      sessions.map(s => sessionRow(p, s)),
-      p.state === 'ok' && !p.sessions.length && S.creating !== p.key && h('div', { class: 'note small' }, 'No sessions')));
+  for (const g of groups()) {
+    const hit = !q || g.label.toLowerCase().includes(q) || g.key.toLowerCase().includes(q);
+    const items = hit ? g.items : g.items.filter(({ s }) => s.name.toLowerCase().includes(q));
+    if (!hit && !items.length) continue;
+    const shut = !q && S.collapsed.has(g.id);
+    const p = g.place;
+    if (!p) {
+      out.push(h('section', { class: 'group category' },
+        groupHead(g, items, mark(g.category?.icon) ?? h('span', { class: 'cat-mark' }, icon('tag')), null),
+        !shut && items.map(({ p, s }) => sessionRow(p, s, true))));
+      continue;
+    }
+    out.push(h('section', { class: 'group place', style: `--c:${p.colour}` },
+      groupHead(g, items, placeMark(p), placeTail(p)),
+      !shut && S.creating === p.key && createEl,
+      !shut && items.map(({ s }) => sessionRow(p, s, false)),
+      !shut && p.state === 'ok' && !p.sessions.length && S.creating !== p.key && h('div', { class: 'note small' }, 'No sessions')));
   }
   if (!out.length) out.push(h('div', { class: 'note' }, `Nothing matches “${S.filter.trim()}”`));
   return out;
 }
 
-function placeHead(p) {
-  const tail =
-    p.state === 'locked' ? h('button', { type: 'button', class: 'chip', onclick: () => unlock(p) }, icon('lock'), 'Unlock')
-    : p.state === 'unreachable' ? h('button', { type: 'button', class: 'chip quiet', title: 'Try again', onclick: () => load(true) }, icon('rotate-cw'), 'Unreachable')
-    : iconBtn('plus', `New session on ${p.label}`, () => startCreate(p.key), 'add');
-  return h('div', { class: 'place-head' }, h('span', { class: 'dot' }), h('span', { class: 'place-name' }, p.label), tail);
+// A group's header: a button that collapses it (showing its count, and the most urgent status in
+// it), then TAIL (a place's + or state).
+function groupHead(g, items, markEl, tail) {
+  const shut = !S.filter.trim() && S.collapsed.has(g.id);
+  const urgent = shut && ['waiting', 'working', 'done'].find(st => items.some(({ p, s }) => statusOf(`${p.key}:${s.name}`, s) === st));
+  return h('div', { class: 'group-head' },
+    h('button', {
+      type: 'button', class: 'group-toggle', 'aria-expanded': String(!shut), 'data-k': g.id,
+      title: `${shut ? 'Show' : 'Hide'} ${g.label}`, onclick: () => toggleGroup(g.id),
+    }, icon('chevron-right'), markEl, h('span', { class: 'group-name' }, g.label),
+    shut && items.length > 0 && h('span', { class: 'group-count' }, String(items.length)),
+    urgent && h('span', { class: `st st-${urgent}`, 'aria-label': STATUS[urgent] })),
+    tail);
 }
+
+function placeTail(p) {
+  if (p.state === 'locked') return h('button', { type: 'button', class: 'chip', onclick: () => unlock(p) }, icon('lock'), 'Unlock');
+  if (p.state === 'unreachable') {
+    return h('button', { type: 'button', class: 'chip quiet', title: 'Try again', onclick: () => load(p.key) }, icon('rotate-cw'), 'Unreachable');
+  }
+  if (p.state === 'pending') return h('span', { class: 'chip quiet', title: 'Listing its sessions' }, spinner(), 'Checking');
+  return iconBtn('plus', `New session on ${p.label}`, () => startCreate(p.key), 'add');
+}
+
+function toggleGroup(id) {
+  if (!S.collapsed.delete(id)) S.collapsed.add(id);
+  store.set('collapsed', [...S.collapsed]);
+  renderLists();
+}
+
+// An icon from the config: a Lucide name (icons.js), or anything else (an emoji) as text.
+function mark(name) {
+  if (!name) return null;
+  return hasIcon(name) ? icon(name) : h('span', { class: 'emoji', 'aria-hidden': 'true' }, name);
+}
+// A place's mark: its icon in its colour, else a dot.
+function placeMark(p) {
+  return h('span', { class: 'pmark', style: p ? `--c:${p.colour}` : null }, (p && mark(p.icon)) ?? h('span', { class: 'dot' }));
+}
+const spinner = () => { const i = icon('loader-circle'); i.classList.add('spin'); return i; };
 
 function statusOf(t, s) {
   if (s.status === 'done') return s.statusAt > (S.seen[t] ?? 0) && !visible().includes(t) ? 'done' : '';
   return s.status;
 }
 
-function sessionRow(p, s) {
+function sessionRow(p, s, showPlace) {
   const t = `${p.key}:${s.name}`;
   const st = statusOf(t, s);
   const open = visible().includes(t);
   const ok = openable(t);
   const main = h('button', {
-    type: 'button', class: 'row-main',
+    type: 'button', class: 'row-main', 'data-k': t,
     title: !ok ? 'Rename this session to open it here' : s.starting ? 'Starting…' : st ? STATUS[st] : null,
     onclick: e => (wide() && (e.shiftKey || e.metaKey || e.ctrlKey) ? openBeside(t) : openSession(t)),
   },
   s.starting ? h('span', { class: 'st st-starting', 'aria-label': 'Starting' }, icon('loader-circle'))
     : h('span', { class: `st${st ? ' st-' + st : ''}`, 'aria-label': st ? STATUS[st] : null }),
   h('span', { class: 'row-name' }, s.name),
-  !wide() && open ? h('span', { class: 'row-meta' }, 'open')
-    : s.windows > 1 && h('span', { class: 'row-meta' }, `${s.windows} windows`));
+  showPlace ? h('span', { class: 'row-meta row-place', title: p.label }, placeMark(p), p.label)
+    : !wide() && open ? h('span', { class: 'row-meta' }, 'open')
+      : s.windows > 1 && h('span', { class: 'row-meta' }, `${s.windows} windows`));
   return h('div', {
     class: `row${open ? ' open' : ''}${t === focused() ? ' focused' : ''}${ok ? '' : ' off'}`, role: 'listitem',
+    style: `--c:${p.colour}`,  // the open marker's colour, also in a category
     oncontextmenu: e => { if (!wide() || s.starting) return; e.preventDefault(); sessionMenu(t, { x: e.clientX, y: e.clientY }); },
   },
   main,
@@ -207,6 +276,7 @@ function startCreate(key) {
   const p = S.places?.find(x => x.key === key);
   if (!p) return;
   if (wide() && !S.sidebar) setSidebar(true);
+  if (S.collapsed.delete(`p:${key}`)) store.set('collapsed', [...S.collapsed]);
   S.creating = key;
   const fallback = suggest(p);
   const input = h('input', {
@@ -247,10 +317,11 @@ function continueCard(t) {
 function renderLists() {
   const list = wide() ? ui.sideList : ui.homeList;
   const active = /** @type {HTMLInputElement | null} */ (document.activeElement);
-  const keep = active && list.contains(active) ? { el: active, from: active.selectionStart, to: active.selectionEnd } : null;
+  const keep = active && list.contains(active) ? { el: active, k: active.dataset.k, from: active.selectionStart, to: active.selectionEnd } : null;
   list.replaceChildren(...placeItems());
   if (keep?.el.isConnected) { keep.el.focus(); try { keep.el.setSelectionRange(keep.from, keep.to); } catch {} }
-  const t = S.recent.find(x => exists(x) && x !== focused());
+  else if (keep?.k) /** @type {HTMLElement | null} */ (list.querySelector(`[data-k="${CSS.escape(keep.k)}"]`))?.focus();
+  const t = lastTarget();
   ui.cont.replaceChildren(...(!wide() && t && !S.filter ? [continueCard(t)] : []));
   for (const s of [sideSearch, homeSearch]) if (document.activeElement !== s.input) s.input.value = S.filter;
 }
@@ -359,9 +430,9 @@ function viewFor(t) {
         if (p) p.sessions = p.sessions.filter(s => s.name !== nameOf(t));
         starting.delete(t);
         setTimeout(() => closeTarget(t));
-        load(true);
+        load(keyOf(t));
       },
-      attached: () => load(true),
+      attached: view => load(keyOf(view.target)),
       actions: view => view.status === 'detached'
         ? [['Reattach', () => view.connect(), true], ['Close', () => closeTarget(view.target)]] : null,
     }, ['--existing', t]);
@@ -374,19 +445,19 @@ function viewFor(t) {
 
 // A slot is one place in the grid. Its header is built once and updated in place: a click on a
 // pane that isn't focused focuses it first (a render), and must still reach the button it began on.
-/** @type {{el: HTMLElement, body: HTMLElement, name: HTMLElement, place: HTMLElement, close: HTMLElement, target: string}[]} */
+/** @type {{el: HTMLElement, body: HTMLElement, name: HTMLElement, place: HTMLElement, mk: HTMLElement, close: HTMLElement, target: string}[]} */
 const slots = [];
 function slot(i) {
   if (!slots[i]) {
-    const name = h('span', { class: 'pane-name' }), place = h('span', { class: 'pane-place' });
+    const name = h('span', { class: 'pane-name' }), place = h('span', { class: 'pane-place' }), mk = h('span');
     const close = iconBtn('x', 'Close', () => closePane(S.panes.indexOf(slots[i].target)));
-    const head = h('div', { class: 'pane-head' }, h('span', { class: 'dot' }), name, place, h('span', { class: 'grow' }), close);
+    const head = h('div', { class: 'pane-head' }, mk, name, place, h('span', { class: 'grow' }), close);
     const body = h('div', { class: 'pane-body' });
     const el = h('div', { class: 'pane' }, head, body);
     el.addEventListener('pointerdown', () => {
       if (wide() && i !== S.focus && i < S.panes.length) { S.focus = i; render(); }
     }, true);
-    slots[i] = { el, body, name, place, close, target: '' };
+    slots[i] = { el, body, name, place, mk, close, target: '' };
   }
   return slots[i];
 }
@@ -399,6 +470,7 @@ function renderPanes() {
     const s = slot(i);
     s.el.style.setProperty('--c', colourOf(t));
     s.el.classList.toggle('focused', !wide() || i === S.focus);
+    if (s.target !== t || !s.mk.firstChild) s.mk.replaceChildren(placeMark(placeOf(t)));
     s.target = t;
     s.name.textContent = nameOf(t);
     s.place.textContent = labelOf(t);
@@ -424,7 +496,7 @@ function renderTop() {
   ui.top.style.setProperty('--c', colourOf(t));
   ui.top.replaceChildren(
     iconBtn('chevron-left', 'All sessions', goHome, 'back'),
-    h('div', { class: 'top-title' }, h('span', { class: 'dot' }), h('b', {}, nameOf(t)), h('small', {}, labelOf(t))),
+    h('div', { class: 'top-title' }, placeMark(placeOf(t)), h('b', {}, nameOf(t)), h('small', {}, labelOf(t))),
     ...(lt ? [h('button', { type: 'button', class: 'last-btn', title: `Switch to ${nameOf(lt)}`, onclick: last },
       icon('arrow-left-right'), h('span', {}, nameOf(lt)))] : []),
     iconBtn('ellipsis', `More for ${nameOf(t)}`, e => sessionMenu(t, e.currentTarget), 'more'));
@@ -467,20 +539,36 @@ function render() {
 }
 
 // ---- the list from the server --------------------------------------------------------------
-// load(true) asks the server to list again rather than share its last list (up to 2 s old), for
-// when you just did something: a fresh request made while another is on the way follows it.
-let loading = null, again = false;
+// load(): the list as the server last had it (it lists places again in the background).
+// load(true) or load(KEY) wait for a new list of every place, or of place KEY, after a change.
+// A request made while another is on the way follows it. An unchanged list isn't drawn again.
+let loading = null, lastList = '';
+const pendingFresh = new Set();
+/** @param {boolean | string} [fresh] */
 function load(fresh = false) {
-  if (loading) { again ||= fresh; return loading; }
+  if (loading) { if (fresh) pendingFresh.add(fresh === true ? '' : fresh); return loading; }
+  const query = fresh === true ? '?fresh' : fresh ? `?fresh=${encodeURIComponent(fresh)}` : '';
   return (loading = (async () => {
+    let changed = false;
     try {
-      const r = await fetch(`/assets/sessions.json${fresh || !S.ready ? '?fresh' : ''}`, { cache: 'no-store' });
-      if (r.ok) S.places = withStarting((await r.json()).places);
+      const r = await fetch(`/assets/sessions.json${query}`, { cache: 'no-store' });
+      const text = r.ok ? await r.text() : '';
+      if (text && (text !== lastList || starting.size)) {
+        const list = JSON.parse(text);
+        lastList = text;
+        S.categories = list.categories ?? [];
+        S.places = withStarting(list.places);
+        changed = true;
+      }
     } catch { /* keep the last list */ }
     loading = null;
     if (!S.ready && S.places) firstList();
-    render();
-    if (again) { again = false; load(true); }
+    if (changed) render();
+    if (pendingFresh.size) {
+      const next = pendingFresh.has('') ? true : [...pendingFresh].join(',');
+      pendingFresh.clear();
+      load(next);
+    }
   })());
 }
 
@@ -516,8 +604,7 @@ function firstList() {
   S.focus = Math.max(0, Math.min(S.focus, S.panes.length - 1));
   if (S.current && !keep(S.current)) {
     toast(`${nameOf(S.current)} has ended`);
-    S.current = null;
-    history.replaceState({ hub: 'home' }, '', urlFor(null));
+    goHome();
   }
   if (pendingArg) {
     const a = pendingArg;
@@ -626,7 +713,30 @@ function sessionMenu(t, at) {
   const choose = () => fill(title,
     wide() && openable(t) && !visible().includes(t) && item('columns-2', 'Open in a new pane', () => { closeMenu(); openBeside(t); }),
     item('pencil', 'Rename', rename),
+    S.categories.length > 0 && item('tag', 'Move to category', pickCategory),
     item('trash-2', 'Kill session', confirmKill, 'danger'));
+
+  const pickCategory = () => {
+    const err = error();
+    const now = sessionOf(t)?.category ?? '';
+    const move = async key => {
+      const r = await runHub(['--category', t, key || '-']);
+      if (!r.ok) { err.textContent = r.message || "Couldn't move it."; return; }
+      closeMenu();
+      const s = sessionOf(t);
+      if (s) s.category = key;
+      render();
+      load(keyOf(t));
+    };
+    const choice = (markEl, label, key) => h('button', {
+      type: 'button', class: `menu-item${key === now ? ' current' : ''}`, role: 'menuitemradio',
+      'aria-checked': String(key === now), onclick: () => move(key),
+    }, markEl ?? icon('tag'), h('span', {}, label), key === now && icon('check'));
+    fill(title,
+      ...S.categories.map(c => choice(mark(c.icon), c.label, c.key)),
+      choice(icon('x'), 'No category', ''),
+      err);
+  };
 
   const rename = () => {
     const err = error();
@@ -675,6 +785,7 @@ function sessionMenu(t, at) {
   };
 
   choose();
+  requestAnimationFrame(() => /** @type {HTMLElement | null} */ (body.querySelector('button, input'))?.focus());
   if (wide()) {
     menu = h('div', { class: 'menu', role: 'menu', 'aria-label': nameOf(t) }, body);
     document.body.append(menu);
@@ -699,12 +810,25 @@ function sessionMenu(t, at) {
   }
 }
 
-function closeMenu() { menu?.remove(); menu = menuAnchor = null; }
+function closeMenu() {
+  if (!menu) return;
+  const back = menuAnchor instanceof HTMLElement && menuAnchor.isConnected ? menuAnchor : null;
+  menu.remove();
+  menu = menuAnchor = null;
+  back?.focus();
+}
 
 // A session has a new name: everything that knew it by the old one follows.
 function renamed(old, t) {
   const v = views.get(old);
-  if (v) { views.delete(old); views.set(t, v); v.target = t; v.args = [t]; v.again = ['--existing', t]; }
+  if (v) {
+    views.delete(old);
+    views.set(t, v);
+    v.target = t;
+    v.args = v.args[0] === '--existing' ? ['--existing', t] : [t];
+    v.again = ['--existing', t];
+  }
+  if (starting.delete(old)) starting.set(t, Date.now());
   S.panes = S.panes.map(x => (x === old ? t : x));
   if (S.current === old) { S.current = t; history.replaceState({ hub: 'session', target: t }, '', urlFor(t)); }
   S.recent = S.recent.map(x => (x === old ? t : x));
@@ -715,7 +839,7 @@ function renamed(old, t) {
   if (s) s.name = nameOf(t);
   toast(`Renamed to ${nameOf(t)}`);
   render();
-  load(true);
+  load(keyOf(t));
 }
 
 function killed(t) {
@@ -725,7 +849,7 @@ function killed(t) {
   if (views.has(t)) closeTarget(t);
   toast(`Killed ${nameOf(t)}`);
   render();
-  load(true);
+  load(keyOf(t));
 }
 
 function unlock(p) {
@@ -734,7 +858,7 @@ function unlock(p) {
   const view = new TermView(['--unlock', p.key], {
     fontSize: S.fontSize, renderer: store.get('renderer', 'webgl'),
     ctrl: () => false, ctrlUsed() {}, copied() {},
-    status: v => { if (v.status === 'unlocked') { close(); toast(`${p.label} unlocked`); load(true); } },
+    status: v => { if (v.status === 'unlocked') { close(); toast(`${p.label} unlocked`); load(p.key); } },
     actions: v => (v.status === 'failed' ? [['Try again', () => v.connect(), true], ['Close', () => close()]] : null),
   });
   const el = h('div', { class: 'modal', onclick: e => { if (e.target === el) close(); } },
@@ -759,7 +883,15 @@ function toast(text, ms = 1800) {
 
 // ---- keyboard, history, layout changes ---------------------------------------------------
 addEventListener('keydown', e => {
-  if (e.key === 'Escape' && (help || menu)) { e.preventDefault(); e.stopPropagation(); closeMenu(); return closeHelp(); }
+  if (e.key === 'Escape' && (help || menu || sheet || modal)) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+    closeHelp();
+    sheet?.remove();
+    sheet = null;
+    return modal?.close();
+  }
   if (!wide() || !e.altKey || e.ctrlKey || e.metaKey) return;
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     const list = allTargets();
@@ -793,7 +925,7 @@ WIDE.addEventListener('change', () => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
-  load(true);
+  load();
   for (const v of views.values()) v.reconnectNow();
 });
 
@@ -808,7 +940,7 @@ if (vv) {
 // ---- start -----------------------------------------------------------------------------------
 {
   const arg = new URLSearchParams(location.search).get('arg');
-  if (arg && /^[A-Za-z0-9_-]+:[A-Za-z0-9_-]{1,32}$/.test(arg) && !arg.endsWith(':new')) {
+  if (arg && /^[A-Za-z0-9_-]+:[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/.test(arg) && !arg.endsWith(':new')) {
     // A link to a session never opened here opens it at once (creating it if needed). A known one
     // (a reload, a session you had open) waits for the list, so a session that ended meanwhile
     // isn't recreated as an empty shell.

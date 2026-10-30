@@ -16,6 +16,9 @@ const hub = await startHub({
     { key: 'bot', label: 'bot', colour: '#d2a8ff' },
   ],
   homeFiles: { '.bash_profile': "PS1='\\[\\e[38;5;245m\\]\\W\\[\\e[0m\\] $ '\n", '.hushlogin': '' },
+  // A category that spans two places, and an icon for each place.
+  extraConfig: ['icon laptop laptop', 'icon server server', 'icon bot bot',
+    "category shop Shop rocket 'laptop:api' 'laptop:web' 'server:deploy'"],
 });
 const { tmux } = hub;
 // Each demo session runs a little script, then leaves a shell.

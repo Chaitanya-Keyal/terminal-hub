@@ -5,10 +5,13 @@
 #                              (NAME alone: the first place). The page's terminals run this.
 #   terminal-hub --existing KEY:NAME   the same, but only if the session still exists (the page
 #                              uses this to reconnect, so it never recreates an ended session)
-#   terminal-hub --list        every place and its sessions, tab-separated (the page's list)
+#   terminal-hub --list [KEY...]   the categories, then every place (or just these) and its
+#                              sessions, tab-separated: the page's list
+#   terminal-hub --config      the same without listing sessions (no network: just the config)
 #   terminal-hub --unlock KEY  ask once for the passphrase of place KEY's ssh key
 #   terminal-hub --rename KEY:NAME NEW   rename a session (the page's session menu runs this)
 #   terminal-hub --kill KEY:NAME         end a session and everything running in it
+#   terminal-hub --category KEY:NAME CAT put a session in category CAT (- for none)
 #   terminal-hub --check       check the setup: tools, config, every place, services
 #   terminal-hub               pick a session with fzf and attach (in an ordinary terminal)
 #
@@ -23,11 +26,20 @@ RUN=${XDG_RUNTIME_DIR:-/tmp}/terminal-hub-$(id -u)
 
 die() { echo "terminal-hub: $*" >&2; exit 1; }
 
+# The config (see config.example) calls these.
 KEY=() LABEL=() COLOUR=() KIND=() ARGS=()
-place() {  # place KEY LABEL COLOUR local|ssh|via [ARGS...]: see config.example
+place() {  # place KEY LABEL COLOUR local|ssh|via [ARGS...]
   [[ $1 =~ ^[A-Za-z0-9_-]+$ ]] || die "place key '$1' in $CONFIG: use letters, digits, - and _"
   [[ ${4:-} =~ ^(local|ssh|via)$ ]] || die "place $1 in $CONFIG: kind must be local, ssh or via"
   KEY+=("$1") LABEL+=("$2") COLOUR+=("$3") KIND+=("$4") ARGS+=("${*:5}")
+}
+declare -A ICON=()
+icon() { ICON[$1]=${2:-}; }  # icon KEY NAME: place KEY's icon (a Lucide name, or an emoji)
+CAT_KEY=() CAT_LABEL=() CAT_ICON=() CAT_PATS=()
+category() {  # category KEY LABEL ICON [PATTERN...]
+  [[ $1 =~ ^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$ ]] || die "category key '$1' in $CONFIG: use letters, digits, - and _"
+  local IFS=$'\n'
+  CAT_KEY+=("$1") CAT_LABEL+=("${2:-$1}") CAT_ICON+=("${3:-}") CAT_PATS+=("${*:4}")
 }
 # shellcheck source=/dev/null
 [[ -f $CONFIG ]] && source "$CONFIG"
@@ -36,10 +48,10 @@ place() {  # place KEY LABEL COLOUR local|ssh|via [ARGS...]: see config.example
 # Listing reuses one ssh connection per place for a minute, so the page can refresh often.
 LIST_SSH=(-o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o "ControlPath=$RUN/ssh-%C"
   -o ControlPersist=60)
-# The fields that can be empty go last: `read` with a tab IFS merges empty fields in between.
-FMT='#{session_name}	#{session_windows}	#{session_attached}	#{prefix}	#{@hub-state}	#{@hub-state-at}'
+# Tab-separated. `read` merges empty fields, so the ones that can be empty start with "=".
+FMT=$'#{session_name}\t#{session_windows}\t#{session_attached}\t#{prefix}\t#{session_path}\t=#{@hub-category}\t=#{@hub-state}\t=#{@hub-state-at}'
 
-# list I: place I's sessions as "name windows attached state state-at" lines (tab-separated).
+# list I: place I's sessions, one FMT line each.
 # No tmux server means no sessions, not an error, hence the `exit 0`s. Returns 2 when ssh was
 # refused because the key is locked (listing can't ask for a passphrase), 1 if unreachable.
 list() {
@@ -47,7 +59,7 @@ list() {
   read -ra a <<<"${ARGS[$1]}"
   case ${KIND[$1]} in
     local) tmux list-sessions -F "$FMT" 2>/dev/null; return 0 ;;
-    via) "${a[@]}" "tmux list-sessions -F '$FMT' 2>/dev/null; exit 0" 2>/dev/null ;;
+    via) timeout 10 "${a[@]}" "tmux list-sessions -F '$FMT' 2>/dev/null; exit 0" 2>/dev/null ;;
     ssh)
       (umask 077 && mkdir -p "$RUN")
       { err=$(timeout 10 ssh "${LIST_SSH[@]}" "${a[0]}" \
@@ -60,27 +72,61 @@ list() {
   esac
 }
 
-# list_all: list every place at once; results land in $TMPD/I (sessions) and $TMPD/I.rc.
+# list_all [I...]: list every place (or these) at once; results land in $TMPD/I and $TMPD/I.rc.
 list_all() {
-  local i
+  local i want=("$@")
+  ((${#want[@]})) || want=("${!KEY[@]}")
   TMPD=$(mktemp -d)
-  for i in "${!KEY[@]}"; do
+  for i in "${want[@]}"; do
     { list "$i" >"$TMPD/$i"; echo $? >"$TMPD/$i.rc"; } &
   done
   wait
 }
 
+# category_of I NAME PATH EXPLICIT: sets CAT to the session's category key, or "". One set from its menu
+# (EXPLICIT; "-" means none) wins; then the first category with a matching pattern: a pattern
+# with a / matches the folder the session started in, one with a : matches PLACE:NAME, and any
+# other matches NAME.
+category_of() {
+  local c pat target
+  CAT=''
+  if [[ -n $4 ]]; then
+    for c in "${!CAT_KEY[@]}"; do [[ ${CAT_KEY[c]} == "$4" ]] && CAT=$4 && return; done
+    [[ $4 == - ]] && return
+  fi
+  for c in "${!CAT_KEY[@]}"; do
+    while IFS= read -r pat; do
+      [[ -n $pat ]] || continue
+      case $pat in */*) target=$3 ;; *:*) target=${KEY[$1]}:$2 ;; *) target=$2 ;; esac
+      # shellcheck disable=SC2053  # the pattern is a glob on purpose
+      [[ $target == $pat ]] && CAT=${CAT_KEY[c]} && return
+    done <<<"${CAT_PATS[c]}"
+  done
+}
+
+# The page's list: the categories, then each place (all, or the indexes given) and its sessions.
+# With LIST=0 (--config), places come without sessions and with the state "pending".
 cmd_list() {
-  local i st name win att prefix state at
-  list_all
-  for i in "${!KEY[@]}"; do
-    case $(<"$TMPD/$i.rc") in 0) st=ok ;; 2) st=locked ;; *) st=unreachable ;; esac
-    printf 'place\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "${LABEL[i]}" "${COLOUR[i]}" "$st"
-    while IFS=$'\t' read -r name win att prefix state at; do
-      [[ -n $name ]] && printf 'session\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "$name" "$win" "$att" "$state" "$at" "$prefix"
+  local i c st name win att prefix path cat state at CAT want=("$@")
+  ((${#want[@]})) || want=("${!KEY[@]}")
+  for c in "${!CAT_KEY[@]}"; do
+    printf 'category\t%s\t%s\t%s\n' "${CAT_KEY[c]}" "${CAT_LABEL[c]}" "${CAT_ICON[c]}"
+  done
+  ((LIST)) && list_all "${want[@]}"
+  for i in "${want[@]}"; do
+    st=pending
+    ((LIST)) && case $(<"$TMPD/$i.rc") in 0) st=ok ;; 2) st=locked ;; *) st=unreachable ;; esac
+    printf 'place\t%s\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "${LABEL[i]}" "${COLOUR[i]}" "$st" "${ICON[${KEY[i]}]:-}"
+    ((LIST)) || continue
+    while IFS=$'\t' read -r name win att prefix path cat state at; do
+      [[ -n $name ]] || continue
+      category_of "$i" "$name" "$path" "${cat#=}"
+      printf 'session\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${KEY[i]}" "$name" "$win" "$att" "${state#=}" "${at#=}" \
+        "$prefix" "$CAT"
     done <"$TMPD/$i"
   done
-  rm -rf "$TMPD"
+  ((LIST)) && rm -rf "$TMPD"
+  return 0
 }
 
 find_place() {
@@ -135,8 +181,9 @@ target() {
   I=$(find_place "${1%%:*}")
 }
 # Names the hub attaches to and creates; they go into shell code unquoted.
-NAME_RE='^[A-Za-z0-9_-]{1,32}$'
-NAME_RULE='use 1-32 letters, digits, - and _'
+# Not starting with -, which tmux would take for an option.
+NAME_RE='^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$'
+NAME_RULE="use 1-32 letters, digits, - and _ (not starting with -)"
 
 # go NAME | KEY:NAME | KEY:new [existing]
 go() {
@@ -179,6 +226,17 @@ cmd_rename() {
   [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
   [[ ${2:-} =~ $NAME_RE ]] || answer 1 "the new name: $NAME_RULE"
   out=$(in_place "$I" "tmux rename-session -t $(q "=$NAME") $2" 2>&1)
+  answer $? "$out"
+}
+
+cmd_category() {
+  local out c ok=0
+  target "${1:-}" || answer 1 "no place called ${1%%:*}"
+  [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || answer 1 "no session named '$NAME'"
+  [[ ${2:-} == - ]] && ok=1
+  for c in "${CAT_KEY[@]}"; do [[ $c == "${2:-}" ]] && ok=1; done
+  ((ok)) || answer 1 "no category called '${2:-}'"
+  out=$(in_place "$I" "tmux set-option -t $(q "=$NAME:") @hub-category $2" 2>&1)
   answer $? "$out"
 }
 
@@ -256,14 +314,24 @@ cmd_pick() {
   go "${pick%%$'\t'*}"
 }
 
+# --list takes place keys; cmd_list works with indexes.
+indexes() {
+  local k
+  IDX=()
+  for k in "$@"; do IDX+=("$(find_place "$k")") || die "no place called $k in $CONFIG"; done
+}
+
+LIST=1
 case ${1:-} in
-  --list) cmd_list ;;
+  --list) indexes "${@:2}" && cmd_list "${IDX[@]}" ;;
+  --config) LIST=0 cmd_list ;;
+  --category) cmd_category "${2:-}" "${3:-}" ;;
   --existing) go "${2:-}" existing ;;
   --unlock) cmd_unlock "${2:-}" ;;
   --rename) cmd_rename "${2:-}" "${3:-}" ;;
   --kill) cmd_kill "${2:-}" ;;
   --check) cmd_check ;;
-  -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
   '') cmd_pick ;;
   -*) die "unknown option $1 (see terminal-hub --help)" ;;
   *) go "$1" ;;

@@ -60,11 +60,14 @@ if [[ ! -f $CONFIG ]]; then
   echo "wrote $CONFIG from config.example: edit it (your places), then run ./install.sh again"
 fi
 
-# App settings: defaults, then the config. Here place() only notes the first place's label.
+# App settings: defaults, then the config. Here place() only notes the first place's label,
+# and the rest of the config is for terminal-hub.
 HUB_NAME='terminal hub' HUB_SHORT_NAME='hub' HUB_APP_ID='hub'
 HUB_DESCRIPTION='Every tmux session in one list' HUB_FALLBACK='' HUB_FALLBACK_NAME=''
 HERE=''
 place() { [[ -n $HERE ]] || HERE=$2; }
+icon() { :; }
+category() { :; }
 # shellcheck source=/dev/null
 source "$CONFIG"
 
@@ -80,7 +83,7 @@ cp web/vendor/*.mjs web/vendor/xterm.css "$new/vendor/"
 
 export HUB_NAME HUB_SHORT_NAME HUB_APP_ID HUB_DESCRIPTION HUB_FALLBACK HUB_FALLBACK_NAME HERE
 PYTHONUTF8=1 python3 -I - "$SHARE" "$new" <<'PY'
-import hashlib, html, json, os, sys
+import gzip, hashlib, html, json, os, sys
 from pathlib import Path
 
 share, assets, env = Path(sys.argv[1]), Path(sys.argv[2]), os.environ
@@ -114,7 +117,25 @@ if fallback:
     (assets / "sw.js").write_text(sw, encoding="utf-8")
     sw_tag = "<script>navigator.serviceWorker?.register('/assets/sw.js', { scope: '/' }).catch(() => {});</script>"
 
+# The page's files get versioned URLs (/assets/v/HASH), which server.py lets browsers keep for
+# good: one hash for the libraries and the font, which rarely change, and one for the rest, so an
+# update to the page doesn't make phones fetch the big files again. Text files get a gzipped copy.
+def version(files):
+    digest = hashlib.sha256()
+    for f in sorted(files):
+        digest.update(f.relative_to(assets).as_posix().encode() + b"\0" + f.read_bytes())
+    return "/assets/v/" + digest.hexdigest()[:12]
+everything = [f for f in assets.rglob("*") if f.is_file()]
+lib = [f for f in everything if f.parent.name == "vendor" or f.name == "FiraCodeNF.woff2"]
+lib_version, app_version = version(lib), version([f for f in everything if f not in lib])
+for f in assets.rglob("*"):
+    if f.suffix in (".js", ".mjs", ".css", ".webmanifest", ".html", ".svg"):
+        with open(f.with_name(f.name + ".gz"), "wb") as out, gzip.GzipFile(fileobj=out, mode="wb", mtime=0) as z:
+            z.write(f.read_bytes())
+
 page = (Path("web/index.html").read_text(encoding="utf-8")
+        .replace("@LIB@", lib_version)
+        .replace("@APP@", app_version)
         .replace("@NAME@", html.escape(env["HUB_NAME"]))
         .replace("@DESCRIPTION@", html.escape(env["HUB_DESCRIPTION"]))
         .replace("@SERVICE_WORKER@", sw_tag))

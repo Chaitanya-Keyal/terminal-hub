@@ -1,6 +1,6 @@
 /* terminal hub. Layout: body.wide (≥900px: sidebar + panes) or body.narrow (phones: home screen,
    or one terminal with a top bar); body.touch adds the key bar under a terminal. */
-@font-face { font-family: "FiraCode NF"; src: url(/assets/FiraCodeNF.woff2) format("woff2"); font-display: block; }
+/* The font's @font-face is in index.html, which knows its versioned URL. */
 
 :root {
   --bg: #0b0d10; --panel: #0f1217; --raise: #151a21; --raise-2: #1c2128; --raise-3: #262c36;
@@ -77,14 +77,31 @@ kbd .icon { width: 12px; height: 12px; }
 
 /* ---- the session list (sidebar and home screen) ---- */
 .list { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
-.place + .place { margin-top: 8px; }
-.place-head {
-  display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 12px;
-  color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+.group + .group { margin-top: 8px; }
+.category + .place { margin-top: 14px; }
+.group-head { display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 4px 0 2px; }
+/* The header's name collapses the group; a chevron in front shows which way. */
+.group-toggle {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 6px 0 4px;
+  border-radius: var(--radius); color: var(--muted); text-align: left;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
 }
-.place-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.place-head .icon-btn.add { opacity: .7; }
-.place-head:hover .icon-btn.add, .place-head .icon-btn.add:focus-visible { opacity: 1; }
+.group-toggle:hover { color: var(--text-2); }
+.group-toggle > .icon:first-child { width: 12px; height: 12px; margin-right: -3px; color: var(--faint); transform: rotate(90deg); transition: transform .12s; }
+.group-toggle[aria-expanded="false"] > .icon:first-child { transform: none; }
+.group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-count { color: var(--faint); font-weight: 500; letter-spacing: 0; }
+.group-head .icon-btn.add { opacity: .7; }
+.group-head:hover .icon-btn.add, .group-head .icon-btn.add:focus-visible { opacity: 1; }
+/* Marks: a place's icon in its colour (or a dot), a category's icon, an emoji in place of either. */
+.pmark, .cat-mark { display: inline-grid; place-items: center; width: 15px; height: 15px; flex: none; color: var(--c, var(--muted)); }
+.pmark .icon, .cat-mark .icon, .group-toggle > .icon:not(:first-child) { width: 14px; height: 14px; flex: none; }
+.category .group-toggle > .icon:not(:first-child) { color: var(--text-2); }
+.emoji { font-size: 13px; line-height: 1; text-transform: none; letter-spacing: 0; }
+.row-place { display: inline-flex; align-items: center; gap: 5px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.row-place .pmark { width: 13px; height: 13px; }
+.row-place .pmark .icon { width: 12px; height: 12px; }
+.row-place .pmark .dot { width: 6px; height: 6px; }
 .chip {
   display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 11px;
   border: 1px solid var(--line-2); background: var(--raise); color: var(--text-2);
@@ -256,10 +273,13 @@ kbd .icon { width: 12px; height: 12px; }
 .cont-slot:not(:empty) { margin: 0 16px 10px; }
 #home .continue { padding: 13px 16px; border-radius: 14px; font-size: 15px; }
 #home .continue-text small { font-size: 13px; }
-.narrow .place + .place { margin-top: 14px; }
-.narrow .place-head { height: 38px; padding: 0 8px 0 20px; font-size: 12px; }
-.narrow .place-head .icon-btn { width: 40px; height: 40px; opacity: 1; }
-.narrow .place-head .icon-btn .icon { width: 20px; height: 20px; }
+.narrow .group + .group { margin-top: 14px; }
+.narrow .group-head { height: 40px; padding: 0 8px 0 10px; }
+.narrow .group-toggle { font-size: 12px; gap: 9px; }
+.narrow .group-head .icon-btn { width: 40px; height: 40px; opacity: 1; }
+.narrow .group-head .icon-btn .icon { width: 20px; height: 20px; }
+.narrow .pmark, .narrow .cat-mark { width: 16px; height: 16px; }
+.narrow .pmark .icon, .narrow .cat-mark .icon, .narrow .group-toggle > .icon:not(:first-child) { width: 15px; height: 15px; }
 .narrow .chip { height: 30px; padding: 0 12px; border-radius: 15px; font-size: 13px; }
 .narrow .row { margin: 0 8px; }
 .narrow .row-main { height: 50px; padding: 0 12px; gap: 11px; border-radius: 10px; }
@@ -313,6 +333,8 @@ kbd .icon { width: 12px; height: 12px; }
 .menu-item:hover, .menu-item:focus-visible { background: var(--raise-2); color: var(--text); }
 .menu-item .icon { color: var(--muted); }
 .menu-item.danger, .menu-item.danger .icon { color: #ff7b72; }
+.menu-item > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item.current > .icon:last-child { color: var(--accent); }
 .menu-item.danger:hover { background: rgba(255, 123, 114, .12); }
 .menu-form { padding: 4px; }
 .menu-text { margin: 6px 6px 10px; color: var(--text-2); font-size: 13px; line-height: 1.45; }

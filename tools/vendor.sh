@@ -9,10 +9,17 @@ cd "$(dirname "$(readlink -f "$0")")/.."
 XTERM=(@xterm/xterm@6.0.0 @xterm/addon-fit@0.11.0 @xterm/addon-webgl@0.19.0
   @xterm/addon-unicode11@0.9.0 @xterm/addon-web-links@0.12.0)
 LUCIDE=1.65.0
-ICONS=(a-arrow-down a-arrow-up arrow-down arrow-left arrow-left-right arrow-left-to-line arrow-right
-  arrow-right-to-line arrow-up check chevron-left clipboard-paste columns-2 ellipsis history keyboard
-  loader-circle lock panel-left pencil plus rotate-cw search settings square-terminal trash-2 unplug
-  wifi-off x)
+# Icons the page uses, then a set for places and categories (config: icon, category; the
+# README lists them). Any other name shows as text, so an emoji works too.
+ICONS=(a-arrow-down a-arrow-up arrow-down arrow-left arrow-left-right arrow-right
+  arrow-up check chevron-left chevron-right clipboard-paste columns-2
+  ellipsis history keyboard loader-circle lock panel-left pencil plus rotate-cw search settings
+  square-terminal tag trash-2 unplug wifi-off x
+  bitcoin book-open bot brain briefcase bug building-2 box chart-line cloud code coffee container
+  cpu database flame flask-conical folder folder-git-2 gamepad-2 gem git-branch globe
+  graduation-cap hammer hard-drive heart house key-round laptop layers leaf mail monitor moon
+  mountain music package palette puzzle rocket router server shield smartphone sparkles star
+  sun target terminal user users wallet wrench zap)
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -64,6 +71,8 @@ export function icon(name, label) {
   if (label) svg.setAttribute('aria-label', label); else svg.setAttribute('aria-hidden', 'true');
   svg.innerHTML = PATHS[name] ?? '';
   return svg;
-}""")
+}
+
+export const hasIcon = name => Object.hasOwn(PATHS, name);""")
 PY
 echo "lucide-static@$LUCIDE (${#ICONS[@]} icons)"
