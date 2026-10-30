@@ -18,7 +18,7 @@ place here "$(hostname)" '#7ee787' local
 # place bot    bot    '#d2a8ff' ssh myserver sudo -u bot -H
 
 # Icons (optional): a place's mark in the list, in its colour. A Lucide icon name from the
-# README's list (laptop, server, bot, code, ...) or an emoji. Without one, a coloured dot.
+# list in docs/config.md (laptop, server, bot, code, ...) or an emoji. Without one, a coloured dot.
 #   icon KEY NAME
 # icon here laptop
 # icon server server
@@ -46,5 +46,5 @@ HUB_DESCRIPTION='Every tmux session in one list'
 HUB_FALLBACK=''
 HUB_FALLBACK_NAME=''                  # shown while switching, e.g. 'the server'
 
-# The local port for ttyd; the page's files use the next one up. Publish both (see the README).
+# The local port for ttyd; the page's files use the next one up. Publish both (docs/install.md).
 HUB_PORT=7682

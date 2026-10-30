@@ -10,7 +10,7 @@ XTERM=(@xterm/xterm@6.0.0 @xterm/addon-fit@0.11.0 @xterm/addon-webgl@0.19.0
   @xterm/addon-unicode11@0.9.0 @xterm/addon-web-links@0.12.0)
 LUCIDE=1.65.0
 # Icons the page uses, then the ones for places and categories (config: icon, category; the
-# page's icon picker; the README lists them). Any other name shows as text, so an emoji works.
+# page's icon picker; docs/config.md lists them). Any other name shows as text, so an emoji works.
 UI_ICONS=(a-arrow-down a-arrow-up arrow-down arrow-left arrow-left-right arrow-right arrow-up
   bell bell-off check chevron-left chevron-right clipboard-paste columns-2 ellipsis history
   keyboard loader-circle lock panel-left paperclip pencil plus rotate-cw search settings

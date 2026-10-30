@@ -16,337 +16,49 @@ a small Python server around [ttyd](https://github.com/tsl0922/ttyd) and
 
 ## What you get
 
-- **One list across machines.** Each *place* in the config is tmux somewhere: here, on another
-  machine over ssh, or as another user, with its own colour and icon. A place that can't be
-  reached says so, one whose ssh key is locked offers to unlock it, and a slow one never holds up
-  the rest.
-- **Categories** group sessions above the places, say one per project, even across machines.
-  Rules in the config sort sessions by folder or name, and the ⋯ menu moves any session. Every
-  group collapses, and a collapsed one still shows if a session in it needs you.
-- **Desktop:** a sidebar and up to four sessions side by side. Recent sessions stay connected in
-  the background, so switching is instant, and a reload brings your layout back.
-- **Phone:** a home screen with every session, then one session at a time with a top bar and a
-  one-row key bar for what a phone keyboard lacks (esc, tab, shift-tab, ctrl, ^C, arrows, paste).
-  Swipes scroll tmux history, and the page installs as an app.
-- **Agent status:** a blue dot while an agent works, yellow when it waits for you (a permission
-  prompt or a question; also counted in the tab title), green when it's done, until you look.
-  Turn on notifications and the hub tells you when a session needs you or finishes.
-- **Files into a session:** send a photo or any file from your phone (⋯, **Send a file**), or drop
-  one on a terminal or paste a screenshot on a desktop. It's saved on the session's machine and
-  its path is typed in, ready for a command, or for Claude Code, which reads it as an image.
-- **New sessions** from the list: press + by a place, type a name or leave it blank. Each
-  session's ⋯ menu renames it or kills it (after asking).
-- **`share`** moves the terminal you're in into tmux, so it shows up in the list. `share -- claude`
-  starts a program in its own session.
+- **One list across machines**, each with its own colour and icon. A place that can't be reached
+  says so, and a slow one never holds up the rest.
+- **Categories** group sessions, say one per project, even across machines.
+- **Desktop:** a sidebar and up to four sessions side by side, switching instantly.
+- **Phone:** a home screen with every session, then one at a time with a key bar for what a phone
+  keyboard lacks. It installs as an app.
+- **Agent status:** blue while an agent works, yellow when it needs you, green when it's done,
+  with notifications if you want them.
+- **Files into a session:** send a photo from your phone, or drop or paste one on a desktop; its
+  path is typed into the session.
+- **`share`** moves the terminal you're in into tmux, so it shows up in the list.
 
-## How it works
-
-```
- browser (phone or desktop)
-    │  HTTPS, through something that authenticates
-    ▼
- tailscale serve ─┬─ /        →  ttyd       127.0.0.1:7682   the page, a terminal per session
- (or a proxy)     └─ /assets  →  server.py  127.0.0.1:7683   its files, the list, files you send
-                                     │
-                              terminal-hub (bash)
-                                     │
-             tmux here  ·  tmux on other machines (ssh)  ·  tmux as another user (sudo)
-```
-
-Everything runs on one machine, the hub. Each session you open in the page is its own connection
-to ttyd, which runs `terminal-hub KEY:NAME` to attach to that tmux session: directly, over ssh, or
-through sudo. When a session closes, `terminal-hub` tells the page why (you detached, the session
-ended, or the connection dropped), so the page can offer to reattach. Renaming and killing a
-session run `terminal-hub --rename` and `--kill` through ttyd the same way.
-
-The list comes from `terminal-hub --list KEY`, which `server.py` runs for each place on its own, so
-a slow place doesn't delay the others; ssh connections are reused for a minute. Open pages get
-changes pushed to them over one connection (server-sent events). The page's files have versioned
-URLs, so browsers keep them.
-
-The other machines need only tmux, and ssh key login from the hub. For the status dots and the
-hub's tmux settings there, run `./install.sh --no-services` on them too.
-
-## Install
+## Quick start
 
 On the hub you need Linux (WSL works) with systemd user services,
 [ttyd](https://github.com/tsl0922/ttyd) 1.7 or newer, tmux and python3.
-[fzf](https://github.com/junegunn/fzf) is optional (a command-line picker).
 
 ```sh
 git clone https://github.com/Chaitanya-Keyal/terminal-hub && cd terminal-hub
 ./install.sh                           # the first run writes ~/.config/terminal-hub/config
 $EDITOR ~/.config/terminal-hub/config  # add your places
 ./install.sh
-loginctl enable-linger "$USER"         # keep it running while you're logged out
-terminal-hub --check
-```
-
-Then publish it. With [Tailscale](https://tailscale.com) (on WSL, run these with the Windows
-`tailscale.exe`):
-
-```sh
 tailscale serve --bg --set-path / http://127.0.0.1:7682
 tailscale serve --bg --set-path /assets http://127.0.0.1:7683
 ```
 
-Open `https://MACHINE.TAILNET.ts.net` on your phone and add it to the home screen.
+Then open `https://MACHINE.TAILNET.ts.net` on your phone and add it to the home screen.
 
-Any other reverse proxy works if it authenticates you first (ttyd hands out shells) and:
+ttyd gives a shell to anyone who can reach it: publish the hub only through something that
+authenticates, like `tailscale serve`, never on an open port.
 
-- sends `/` and its websockets to ttyd, and `/assets/…` to server.py with `/assets` cut off;
-- keeps the `Host` header (both compare it with the page's `Origin`);
-- doesn't buffer `/assets/events` (server-sent events), and lets `/assets/send` take files up to
-  100 MB.
+## Docs
 
-**The hub's tmux settings** are optional but recommended: they turn on mouse mode (for swipe
-scrolling and drag-to-copy), size windows to whichever screen you used last, and add a quiet
-status line tagged with the place. In `~/.tmux.conf` on each machine (`./install.sh
---no-services` puts the file on the other machines):
-
-```tmux
-set -g @hub-tag laptop               # default: the hostname
-set -g @hub-colour '#7ee787'
-source-file -q ~/.local/share/terminal-hub/tmux.conf
-```
-
-## Config
-
-`~/.config/terminal-hub/config` is a bash file; [config.example](config.example) explains every
-setting. Most of it is the list of places:
-
-```bash
-place laptop laptop  '#7ee787' local                           # tmux here
-place srv    server  '#ff7b72' ssh myserver                    # tmux on myserver (an ssh alias)
-place bot    bot     '#d2a8ff' ssh myserver sudo -u bot -H     # another user's tmux there
-place box    sandbox '#79c0ff' via sudo -n -u sandbox bash -c  # another user's tmux here
-```
-
-Changes to places apply at once. The first place is "here", where links without a place open.
-
-- ssh places need key login, because listing can't answer prompts. A key with a passphrase works
-  if an ssh-agent holds it (`AddKeysToAgent yes` in `~/.ssh/config`); while it's locked, the place
-  shows **Unlock**, which asks for the passphrase once.
-- Session names are 1 to 32 letters, digits, `-` and `_`.
-
-The app settings (`HUB_NAME` and friends) are built into the page, and `HUB_PORT` (ttyd's port;
-the page's files use the next one) into the services, so run `./install.sh` after changing them.
-`HUB_FALLBACK` makes the installed app open another URL when this machine doesn't answer within 4
-seconds, say the same hub on an always-on server.
-
-### Icons and categories
-
-```bash
-icon laptop laptop                          # a place's icon, shown in its colour
-icon bot    🤖                               # or an emoji
-category work  Work  briefcase '*/work/*'   # sessions started in a work folder
-category ops   Ops   rocket    'srv:*' 'deploy*'
-```
-
-A session goes into the first category with a matching pattern: one with a `/` matches the folder
-the session started in, one with a `:` matches `PLACE:NAME`, and any other matches the session's
-name (`*` and `?` work as in the shell). The ⋯ menu's **Move to category** overrides the rules for
-that session, **No category** included; it's kept in the session's tmux option `@hub-category`.
-Categories with no sessions don't show.
-
-You can also make categories on the page: a session's ⋯, **Move to category**, **New
-category…**, with a name, an icon, and (ticked unless it's your home folder) a rule that catches
-sessions started in that session's folder, so the next one started there lands in it too. Those
-live in `~/.config/terminal-hub/categories` (one per line, tab-separated; not run as code), and
-their own ⋯ renames or deletes them. Categories in the config are changed in the config.
-
-Icons can be an emoji, or one of these [Lucide](https://lucide.dev/icons) names: bitcoin,
-book-open, bot, box, brain, briefcase, bug, building-2, chart-line, cloud, code, coffee,
-container, cpu, database, flame, flask-conical, folder, folder-git-2, gamepad-2, gem, git-branch,
-globe, graduation-cap, hammer, hard-drive, heart, house, key-round, laptop, layers, leaf, mail,
-monitor, moon, mountain, music, package, palette, puzzle, rocket, router, server, shield,
-smartphone, sparkles, star, sun, target, terminal, user, users, wallet, wrench, zap. More can be
-added to `tools/vendor.sh`.
-
-## Using it
-
-**Desktop.** Click a session to open it. Shift+click, or the split button that appears on hover,
-opens it in a new pane beside the others. The ⋯ button next to it, or a right-click on it,
-renames it, moves it to another category, or kills it, and for an open session sends a file (so
-does dropping a file on its terminal, or pasting an image into it). Click a group's name to
-collapse it. The keyboard button at the bottom of the sidebar lists the shortcuts, and common tmux
-keys after the open session's tmux prefix:
-
-| | |
-| --- | --- |
-| Alt+↑, Alt+↓ | previous, next session |
-| Alt+\` | the last session |
-| Shift+click | open in a new pane |
-| Shift+drag | select text to copy |
-| Shift+right-click | the browser's menu |
-
-With tmux's mouse mode on, tmux gets plain drags (its copy reaches your clipboard) and
-right-clicks (its own menu); Shift hands them to the page instead. On a Mac, use ⌥ rather than
-Shift.
-
-**Phone.** Tap a session to open it, and use the back button (or the browser's) to return to the
-list. The ⋯ on each session, and the one in the top bar, rename, move or kill it; the top bar's
-also sends a file into the session. The swap button jumps to the last session. ctrl on the key
-bar applies to the next key; arrows repeat while held. The gear on the home screen sets the text
-size.
-
-**Sent files** land in a private folder on the session's machine, `$TMPDIR/terminal-hub-files-UID`
-(`/tmp/…` without a TMPDIR), which the system clears now and then. Their names keep letters,
-digits, `.`, `-` and `_`.
-
-**Links.** `/?arg=KEY:NAME` opens session NAME on place KEY, creating it if it doesn't exist.
-`/?arg=NAME` does the same on the first place, `/?arg=new` starts a new shell there, and
-`/?arg=KEY:new` starts one on place KEY.
-
-## Agent status
-
-The dots come from options on each tmux session, which anything inside the session can set with
-`hub-state`:
-
-```sh
-hub-state working    # blue
-hub-state waiting    # yellow: needs you
-hub-state done       # green, until you look at the session
-hub-state clear
-```
-
-**Claude Code** sets them through hooks. Add the hooks in
-[integrations/claude-code.json](integrations/claude-code.json) to `~/.claude/settings.json`: if you
-have no `"hooks"` there yet, copy the block in; otherwise add each event's entry to your lists.
-With [jq](https://jqlang.org), this merges them for you:
-
-```sh
-jq --slurpfile h integrations/claude-code.json \
-  '.hooks = ((.hooks // {}) as $old | reduce ($h[0].hooks | to_entries[]) as $e
-     ($old; .[$e.key] = ((.[$e.key] // []) + $e.value | unique)))' \
-  ~/.claude/settings.json > settings.tmp && cat settings.tmp > ~/.claude/settings.json && rm settings.tmp
-```
-
-Every hook runs `~/.local/bin/hub-state hook`, which reads the event and sets the dot: working
-when you send a message, waiting when a permission prompt or a question opens, working again as
-soon as you answer, done when the turn ends (on an error too), and cleared when you stop Claude
-(Esc, or no to a permission) or it exits. Claude Code has no hooks for answering a prompt or for
-stopping, so during a turn `hub-state` watches for those in the background (the prompt closing on
-screen, the interruption in Claude's transcript). A subagent finishing its work doesn't hide a
-question the main agent is asking you. Outside tmux the hooks do nothing.
-
-**OpenCode** (v2) sets them through a small plugin that runs in its terminal window, so it knows
-its tmux pane even when OpenCode's server is the shared background service. install.sh puts it in
-`~/.local/share/terminal-hub/opencode`; list that folder, with its full path, in
-`~/.config/opencode/cli.json` (create the file if you have none):
-
-```json
-{ "plugins": ["/home/you/.local/share/terminal-hub/opencode"] }
-```
-
-The dot is working while one of the window's tabs is busy, waiting when one asks for a permission
-or a question, done when they finish, and cleared when you stop one with Esc or close OpenCode.
-
-Agents on the other machines need `hub-state` (and, for OpenCode, the plugin) there: run
-`./install.sh --no-services` on each, and set up the hooks or the plugin as above.
-
-**Notifications.** The bell at the bottom of the sidebar (on a phone: the gear, then
-Notifications) asks the browser to allow them. Then a session that starts waiting for you, or
-finishes, raises a notification, unless it's on your screen; clicking it opens the session. They
-come while the hub is open, in any tab or window: a browser can't run a page that's closed, so a
-phone gets them while the app is open or just in the background. On an iPhone, add the hub to the
-home screen first (Safari offers notifications only to installed apps).
-
-## share
-
-```sh
-share [NAME] [-- COMMAND...]
-```
-
-Run in an ordinary terminal, `share` moves you into a tmux session (named after the folder, or
-NAME) so it shows up in the hub; detach with your tmux prefix and `d` to get the plain terminal
-back. With a command, the session runs just that command and closes when it exits. A shell
-function saves typing, and passes arguments along:
-
-```sh
-cl() { share -- claude "$@"; }       # cl --resume
-```
-
-## Security
-
-ttyd gives a shell to anyone who can reach it, so both services listen on 127.0.0.1 only. Publish
-them only through something that authenticates, such as `tailscale serve` (tailnet only), and
-never expose the two ports directly. Other websites can't use your browser to get in: ttyd runs
-with `--check-origin`, so it takes terminals only from the hub's own page, and server.py does the
-same check before saving a file you send. Everything else that changes something (opening,
-creating, renaming or killing a session) goes through ttyd. The session list
-(`/assets/sessions.json`) shows session names; it's published the same way as the rest.
-
-## Updating and removing
-
-```sh
-./install.sh --pull                  # git pull, then install
-./install.sh --uninstall             # stop and remove everything except your config
-```
-
-Updates apply when you reload the page; your tmux sessions keep running. A changed service
-restarts ttyd, and open pages reconnect.
-
-## Troubleshooting
-
-`terminal-hub --check` checks the tools, the config, every place, the services and the ports.
-
-- **A place says Unreachable:** ssh couldn't connect within 5 seconds. Try `ssh HOST true` as the
-  hub's user; it has to work without a password prompt.
-- **A place says Unlock:** its ssh key has a passphrase and isn't in the agent. Tap Unlock, or run
-  `terminal-hub --unlock KEY`.
-- **A place says Checking:** its first list is taking a while (a slow or sleeping machine); the
-  rest of the list doesn't wait for it.
-- **The page loads but the list stays empty:** `/assets` isn't published, or the asset service is
-  down: `systemctl --user status terminal-hub-assets`.
-- **Swiping doesn't scroll:** turn on tmux mouse mode (the hub's tmux settings do).
-- **"Notifications are blocked":** the browser was told no once; allow notifications in the
-  site's settings (the lock or tune icon next to the address), then turn the bell on again.
-- **No notifications, though they're allowed:** the system may hide the browser's notifications.
-  On Windows, check Settings → System → Notifications (the switch at the top, which covers every
-  app, then your browser), and Do not disturb. A browser that forgets the permission when it
-  closes (Edge: "Choose what to clear every time you close the browser", Site permissions) turns
-  the bell off again on the next visit.
-
-## Where things go
-
-| Path | What |
-| --- | --- |
-| `~/.config/terminal-hub/config` | your settings |
-| `~/.local/bin/terminal-hub` | lists sessions and attaches to them (ttyd runs it) |
-| `~/.local/bin/hub-state`, `share` | the status dots, and `share` |
-| `~/.local/share/terminal-hub/` | the page, `server.py`, the tmux settings and the OpenCode plugin |
-| `~/.config/systemd/user/terminal-hub.service` | ttyd |
-| `~/.config/systemd/user/terminal-hub-assets.service` | `server.py` |
-| `$TMPDIR/terminal-hub-files-UID/` | files sent from the page, on the session's machine |
-
-install.sh writes the services for this machine (where it found ttyd, python3 and the tools
-terminal-hub runs, and `HUB_PORT`). For anything else, use a drop-in:
-`systemctl --user edit terminal-hub`.
-
-## Development
-
-There's no build step: edit the files in `web/`, run `./install.sh` and reload. The JavaScript is
-type-checked with TypeScript through JSDoc comments. The tests start throwaway tmux servers and
-drive the page in Chromium:
-
-```sh
-cd tests
-npm ci && npx playwright install chromium
-npm run typecheck
-npm test                             # hub-state, then the page end to end
-npm run screenshots                  # a demo hub with made-up sessions, into ../docs
-```
-
-`tools/vendor.sh` downloads the pinned xterm.js and Lucide versions into `web/vendor/` and checks
-their integrity. `icons/make-icons.py` draws the app icon (it needs Pillow).
+- [Install](docs/install.md): what you need, publishing (other proxies too), the other machines,
+  tmux settings, updating, troubleshooting
+- [Config](docs/config.md): places, icons, categories, app settings
+- [Using it](docs/using.md): desktop and phone, sending files, notifications, links, `share`
+- [Agent status](docs/agents.md): the dots, Claude Code, OpenCode, your own scripts
+- [How it works](docs/development.md): the pieces, security, and working on it
 
 ## Credits
 
 [ttyd](https://github.com/tsl0922/ttyd) (MIT) runs the terminals, [xterm.js](https://xtermjs.org)
 (MIT) draws them, the icons are [Lucide](https://lucide.dev) (ISC), and the font is FiraCode Nerd
 Font (SIL OFL 1.1). Their licences are in `web/vendor/` and `web/FiraCodeNF-LICENSE.txt`.
-
-## License
-
-[MIT](LICENSE)
+Licensed under [MIT](LICENSE).

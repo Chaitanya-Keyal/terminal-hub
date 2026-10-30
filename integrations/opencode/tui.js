@@ -3,7 +3,7 @@
 //
 // It's a TUI plugin, so it runs in the terminal, inside the tmux pane, even when OpenCode's server
 // is the shared background service (which can't tell which terminal a session is shown in).
-// Install: list this folder in ~/.config/opencode/cli.json (see README.md).
+// Install: list this folder in ~/.config/opencode/cli.json (see docs/agents.md).
 import { Plugin } from '@opencode/plugin/tui';
 import { createEffect, createRoot } from 'solid-js';
 import { spawn } from 'node:child_process';

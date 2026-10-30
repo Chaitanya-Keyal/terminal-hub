@@ -157,10 +157,10 @@ cmp -s web/server.py "$SHARE/server.py" || restart_assets=1
 cp web/server.py "$SHARE/"
 cp tmux/hub.conf "$SHARE/tmux.conf"
 mkdir -p "$SHARE/opencode"
-cp integrations/opencode/tui.js "$SHARE/opencode/"  # the OpenCode plugin (README: Agent status)
+cp integrations/opencode/tui.js "$SHARE/opencode/"  # the OpenCode plugin (docs/agents.md)
 tmux_hint() {
   grep -qs 'terminal-hub/tmux.conf' "$HOME/.tmux.conf" ||
-    echo "optional: add the hub's tmux settings to ~/.tmux.conf (README: Install)"
+    echo "optional: add the hub's tmux settings to ~/.tmux.conf (docs/install.md)"
 }
 
 if ((!services)); then
@@ -201,7 +201,7 @@ fi
 
 echo "installed '$HUB_NAME': ttyd on 127.0.0.1:$HUB_PORT, the page's files on 127.0.0.1:$((HUB_PORT + 1))"
 if ((fresh)); then
-  echo "publish both through something that authenticates (README: Install), say on your tailnet:"
+  echo "publish both through something that authenticates (docs/install.md), say on your tailnet:"
   echo "  tailscale serve --bg --set-path / http://127.0.0.1:$HUB_PORT"
   echo "  tailscale serve --bg --set-path /assets http://127.0.0.1:$((HUB_PORT + 1))"
 fi

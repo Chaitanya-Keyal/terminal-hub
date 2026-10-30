@@ -383,7 +383,7 @@ cmd_check() {
     echo "services"
     for t in terminal-hub terminal-hub-assets; do say "$t" "$(systemctl --user is-active "$t" 2>/dev/null)"; done
   fi
-  echo "ports (publish both through something that authenticates: README, Install)"
+  echo "ports (publish both through something that authenticates: docs/install.md)"
   for t in "ttyd $HUB_PORT" "files $((HUB_PORT + 1))"; do
     if (exec 3<>"/dev/tcp/127.0.0.1/${t#* }") 2>/dev/null; then say "${t% *}" "127.0.0.1:${t#* } answers"
     else say "${t% *}" "nothing on 127.0.0.1:${t#* }"; ok=0; fi
