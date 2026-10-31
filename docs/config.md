@@ -34,9 +34,10 @@ category ops   Ops   rocket    'srv:*' 'deploy*'
 
 A session goes into the first category with a matching pattern: one with a `/` matches the folder
 the session started in, one with a `:` matches `PLACE:NAME`, and any other matches the session's
-name (`*` and `?` work as in the shell). The ⋯ menu's **Move to category** overrides the rules for
-that session, **No category** included; it's kept in the session's tmux option `@hub-category`.
-Categories with no sessions don't show.
+name (`*` and `?` work as in the shell). The ⋯ menu's **Move to category**, or dragging the session
+into a category, overrides the rules for that session (**No category**, or dragging it to its
+place, included); it's kept in the session's tmux option `@hub-category`. Categories with no
+sessions don't show, except while you drag one.
 
 You can also make categories on the page: a session's ⋯, **Move to category**, **New
 category…**, with a name, an icon, and (ticked unless it's your home folder) a rule that catches

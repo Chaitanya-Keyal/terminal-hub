@@ -134,6 +134,7 @@ kbd .icon { width: 12px; height: 12px; }
 /* Reordering: the row being dragged stands out, and nothing gets selected meanwhile (on a phone,
    holding a row is how a drag starts, so it mustn't select text or open the system's menu). */
 .row.dragging { z-index: 1; }
+.group.empty .group-name::after { content: " · drop here"; color: var(--faint); }
 .row.dragging .row-main { background: var(--raise-2); color: var(--text); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
 .reordering, .reordering * { cursor: grabbing; -webkit-user-select: none; user-select: none; }
 .touch .row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

@@ -374,15 +374,20 @@ function renderLists() {
   for (const s of [sideSearch, homeSearch]) if (document.activeElement !== s.input) s.input.value = S.filter;
 }
 
-// ---- reordering: drag a session up or down its group ----------------------------------------
+// ---- dragging sessions: reorder a group, or move a session to another category -----------------
 // With a mouse, press and move; on a touch screen, hold it a moment first (a quick swipe still
-// scrolls). The row moves through its group as you go, and the list scrolls when you hold it near
-// an edge. Dropping it saves the group's order on the hub (terminal-hub --order), so every device
-// shows it. Not while the list is filtered, which shows only part of a group.
-/** @type {{row: HTMLElement, group: HTMLElement, id: string, y: number, moved: boolean, stale?: boolean, before?: string[], box?: HTMLElement | null, frame?: number} | null} */
+// scrolls). The row follows the pointer through the list, which scrolls when you hold it near an
+// edge. It can go into any category (empty ones show while you drag) or back to its own place, out
+// of its category; not to another place, as tmux sessions don't move between machines. Dropping it
+// saves its group's order on the hub (terminal-hub --order, and --category when the group changed),
+// so every device shows it. Not while the list is filtered, which shows only part of each group.
+/** @type {{row: HTMLElement, t: string, from: HTMLElement, group: HTMLElement, y: number, moved: boolean, stale?: boolean, before?: string, home?: Element | null, box?: HTMLElement | null, frame?: number} | null} */
 let drag = null;
 const rowsOf = group => /** @type {HTMLElement[]} */ ([...group.querySelectorAll(':scope > .row')]);
 const keyOfRow = row => /** @type {HTMLElement} */ (row.querySelector('.row-main')).dataset.k ?? '';
+const groupOf = el => /** @type {HTMLElement} */ (el.querySelector('.group-toggle'))?.dataset.k ?? '';
+// Whether session T may go into the list's group ID: any category, or its own place.
+const mayGo = (t, id) => id.startsWith('c:') || id === `p:${keyOf(t)}`;
 
 // The row a press on TARGET would pick up, as a drag that hasn't moved yet, or null.
 /** @param {EventTarget | null} target @param {number} y */
@@ -390,18 +395,26 @@ function pickUp(target, y) {
   const el = /** @type {Element} */ (target);
   const row = /** @type {HTMLElement | null} */ (el.closest?.('.row'));
   const group = /** @type {HTMLElement | null} */ (row?.closest('.group') ?? null);
-  const id = /** @type {HTMLElement | null} */ (group?.querySelector('.group-toggle'))?.dataset.k;
-  if (!row || !group || !id || el.closest('.row-more, .row-split') || S.filter.trim()) return null;
-  return { row, group, id, y, moved: false };
+  if (!row || !group || !groupOf(group) || el.closest('.row-more, .row-split') || S.filter.trim()) return null;
+  return { row, t: keyOfRow(row), from: group, group, y, moved: false };
 }
 
 function dragStart() {
   if (!drag) return;
   drag.moved = true;
-  drag.before = rowsOf(drag.group).map(keyOfRow);
+  drag.before = rowsOf(drag.group).map(keyOfRow).join('\n');
+  drag.home = drag.row.nextElementSibling;  // where it goes back to over a group it can't join
   drag.row.classList.add('dragging');
   document.body.classList.add('reordering');
   closeMenu();
+  // Categories with no sessions aren't listed; while dragging, they show at the end (where they
+  // don't move what's under the pointer), to drop into.
+  const list = /** @type {HTMLElement} */ (drag.row.closest('.list'));
+  const shown = new Set([...list.querySelectorAll('.group.category')].map(groupOf));
+  for (const c of S.categories.filter(c => !shown.has(`c:${c.key}`))) {
+    const g = { id: `c:${c.key}`, key: c.key, label: c.label, category: c, place: null, items: [] };
+    list.append(h('section', { class: 'group category empty' }, groupHead(g, [], h('span', { class: 'cat-mark' }, mark(c.icon) ?? icon('tag')), null)));
+  }
   let box = drag.row.parentElement;  // what scrolls: the sidebar's list, or the phone's home screen
   while (box && !(/auto|scroll/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
   drag.box = box;
@@ -417,18 +430,30 @@ function dragStart() {
   drag.frame = requestAnimationFrame(tick);
 }
 
-// Move the dragged row past the neighbours whose middle the pointer (at Y) has crossed.
+// Put the dragged row where the pointer (at Y) is: in the group under it, before the first row
+// whose middle is below the pointer. Over a group it can't join, it goes back where it started,
+// so letting go there changes nothing.
 /** @param {number} y */
 function dragTo(y) {
   if (!drag) return;
   drag.y = y;
-  const mid = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
-  for (;;) {
-    const rows = rowsOf(drag.group), i = rows.indexOf(drag.row);
-    if (i > 0 && y < mid(rows[i - 1])) rows[i - 1].before(drag.row);
-    else if (i < rows.length - 1 && y > mid(rows[i + 1])) rows[i + 1].after(drag.row);
-    else break;
+  const groups = /** @type {HTMLElement[]} */ ([...(drag.row.closest('.list')?.querySelectorAll(':scope > .group') ?? [])]);
+  const target = groups.filter(g => g.getBoundingClientRect().top <= y).pop() ?? groups[0];
+  if (!target) return;
+  if (!mayGo(drag.t, groupOf(target))) {
+    if (drag.row.nextElementSibling !== drag.home || drag.row.parentElement !== drag.from) drag.from.insertBefore(drag.row, drag.home ?? null);
+    drag.group = drag.from;
+    return;
   }
+  const mid = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+  const rows = rowsOf(target).filter(r => r !== drag?.row);
+  const next = rows.find(r => y < mid(r));
+  if (next) { if (drag.row.nextElementSibling !== next) next.before(drag.row); }
+  else {
+    const last = rows[rows.length - 1] ?? target.querySelector(':scope > .group-head');
+    if (last && last.nextElementSibling !== drag.row) last.after(drag.row);
+  }
+  drag.group = target;
 }
 
 /** @param {boolean} save */
@@ -439,15 +464,25 @@ function dragEnd(save) {
   cancelAnimationFrame(d.frame ?? 0);
   document.body.classList.remove('reordering');
   d.row.classList.remove('dragging');
-  const order = rowsOf(d.group).map(keyOfRow);
-  if (d.moved && save && order.join('\n') !== d.before?.join('\n')) {
-    S.orders = { ...S.orders, [d.id]: order };
-    runHub(['--order', d.id, ...order]).then(r => {
-      if (r.ok) return;
-      toast(r.message || "Couldn't save the order", 4500);
-      lastList = '';  // take the hub's order again
+  const id = groupOf(d.group), moved = d.group !== d.from;
+  // A collapsed group shows no rows: the session joins the end of it.
+  const order = S.collapsed.has(id)
+    ? [...(groups().find(g => g.id === id)?.items ?? []).map(({ p, s }) => `${p.key}:${s.name}`).filter(x => x !== d.t), d.t]
+    : rowsOf(d.group).map(keyOfRow);
+  if (d.moved && save && (moved || order.join('\n') !== d.before)) {
+    const category = id.startsWith('c:') ? id.slice(2) : '-';  // "-": none, so it shows in its place
+    S.orders = { ...S.orders, [id]: order };
+    const s = sessionOf(d.t);
+    if (moved && s) s.category = category === '-' ? '' : category;
+    (async () => {
+      const r = moved ? await runHub(['--category', d.t, category]) : { ok: true, message: '' };
+      const saved = r.ok ? await runHub(['--order', id, ...order]) : r;
+      if (moved) load(keyOf(d.t));
+      if (saved.ok) return;
+      toast(saved.message || (moved ? "Couldn't move it" : "Couldn't save the order"), 4500);
+      lastList = '';  // take the hub's list again
       load();
-    });
+    })();
   }
   if (d.moved || d.stale) renderLists();
 }

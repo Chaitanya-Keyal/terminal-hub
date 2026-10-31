@@ -456,6 +456,37 @@ try {
     check('... and deleted, its sessions back in their places', await until(async () =>
       (await order()) === 'Work,laptop,server,slow' && (await group('server').locator('.row-name').allTextContents()).join() === 'bot1,logs'), await order());
 
+    // Dragging a session into a category, back to its place, and (not) to another place. AT gives
+    // where to let go; it's asked once the drag is on, when empty categories show too.
+    const rowOf = name => pg.locator('#sidebar .row').filter({ has: pg.locator('.row-name', { hasText: new RegExp(`^${name}$`) }) });
+    const dragRow = async (name, at) => {
+      const b = await rowOf(name).boundingBox();
+      if (!b) throw new Error(`no row ${name}`);
+      const x = b.x + 40, y = b.y + b.height / 2;
+      await pg.mouse.move(x, y);
+      await pg.mouse.down();
+      await pg.mouse.move(x, y + 8);
+      const to = await at();
+      for (let i = 1; i <= 10; i++) await pg.mouse.move(x, y + 8 + ((to - y - 8) * i) / 10);
+      await pg.mouse.up();
+    };
+    const top = async loc => (await loc.boundingBox())?.y ?? 0;
+    const categoryOf = name => hub2.tmux('server', 'show-options', '-v', '-t', `=${name}:`, '@hub-category');
+    const rowsIn = async name => (await group(name).locator('.row-name').allTextContents()).join();
+    await dragRow('logs', async () => (await top(rowOf('notes'))) + 3);
+    check('dragging a session into a category moves it there, where you let go', await until(async () =>
+      (await rowsIn('Work')) === 'api,logs,notes' && categoryOf('logs') === 'work'), `${await rowsIn('Work')} / ${categoryOf('logs')}`);
+    await dragRow('logs', async () => (await top(rowOf('bot1'))) + 30);
+    check('... and dragging it to its own place takes it out of the category', await until(async () =>
+      (await rowsIn('server')) === 'bot1,logs' && categoryOf('logs') === '-'), `${await rowsIn('server')} / ${categoryOf('logs')}`);
+    await dragRow('notes', async () => (await top(rowOf('bot1'))) + 5);
+    await sleep(800);
+    check("... but not to another place: sessions don't move between machines",
+      (await rowsIn('Work')) === 'api,notes' && hub2.tmux('laptop', 'show-options', '-v', '-t', '=notes:', '@hub-category') === 'work', await rowsIn('Work'));
+    await dragRow('bot1', async () => (await top(group('Bots').locator('.group-head'))) + 12);
+    check('an empty category shows while dragging, to drop into', await until(async () =>
+      (await order()) === 'Work,Bots,laptop,server,slow' && (await rowsIn('Bots')) === 'bot1' && categoryOf('bot1') === 'bots'), `${await order()} / ${categoryOf('bot1')}`);
+
     writeFileSync(join(extra, 'slow'), '');  // the slow place now takes 3 s to answer
     await sleep(2500);                       // so every list is stale
     const ms = await pg.evaluate(async () => { const t = performance.now(); await fetch('/assets/sessions.json', { cache: 'no-store' }); return performance.now() - t; });

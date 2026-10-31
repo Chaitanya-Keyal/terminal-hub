@@ -5,9 +5,9 @@
 Click a session to open it. Shift+click, or the split button that appears on hover, opens it in a
 new pane beside the others (up to four). The ⋯ button next to a session, or a right-click on it,
 renames it, moves it to another category, or kills it (after asking), and for an open session
-sends a file. Drag a session up or down to reorder its group. Click a group's name to collapse it
-(a collapsed one still shows a session that needs you). Press + by a place for a new session (see
-below).
+sends a file. Drag sessions to reorder them or move them between groups (see Order, below).
+Click a group's name to collapse it (a collapsed one still shows a session that needs you). Press +
+by a place for a new session (see below).
 
 The keyboard button at the bottom of the sidebar lists the shortcuts, and common tmux keys after
 the open session's tmux prefix:
@@ -29,7 +29,7 @@ brings your layout back.
 
 Tap a session to open it, and use the back button (or the browser's) to return to the list. The
 ⋯ on each session, and the one in the top bar, rename, move or kill it; the top bar's also sends a
-file into the session. To reorder a group, hold a session a moment, then drag it. The swap button
+file into the session. To drag a session, hold it a moment first. The swap button
 jumps to the last session. The key bar has what a phone keyboard lacks: esc, tab, shift-tab, ctrl
 (for the next key), ^C, arrows (they repeat while held) and paste. Swipes scroll tmux's history.
 The gear on the home screen sets the text size and turns notifications on. Add the page to your
@@ -52,8 +52,12 @@ session is made: never on a reconnect, and never in a session that's there alrea
 
 ## Order
 
-The order you drag sessions into is kept on the hub (`~/.config/terminal-hub/order`), so every
-device shows it; new sessions join the end of their group, and a renamed one keeps its place.
+Drag a session up or down its group to reorder it, onto a category to move it there (categories
+with no sessions show while you drag), or onto its own place to take it out of its category. It
+can't go to another place: tmux sessions don't move between machines.
+
+The order is kept on the hub (`~/.config/terminal-hub/order`), so every device shows it; new
+sessions join the end of their group, and a renamed one keeps its place.
 
 ## Sending files
 
