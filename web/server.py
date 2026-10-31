@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The terminal hub's /assets server: the page's files, and /assets/sessions.json, the list of
-categories, places and sessions (from terminal-hub). ttyd serves the page and the terminals.
+categories, places and sessions, and the order you dragged them into (from terminal-hub). ttyd
+serves the page and the terminals.
 
     server.py PORT DIRECTORY
 
@@ -35,7 +36,8 @@ CONFIG = os.environ.get("TERMINAL_HUB_CONFIG") or os.path.expanduser("~/.config/
 
 state = threading.Condition()
 CATEGORIES = os.path.join(os.path.dirname(CONFIG), "categories")  # the ones made on the page
-config = {"stamp": None, "categories": [], "places": []}  # stamp: when the two files last changed
+ORDER = os.path.join(os.path.dirname(CONFIG), "order")  # the order you dragged sessions into
+config = {"stamp": None, "categories": [], "places": [], "orders": {}}  # stamp: when the files last changed
 # Per place key: busy (a list is running), started (when it started), listed (when the last
 # finished list started; 0: never), again (list once more when this one ends), state, sessions.
 lists = {}
@@ -61,11 +63,14 @@ def run(*args, timeout):
 
 
 def parse(out):
-    """terminal-hub's tab-separated lines → (categories, places with their sessions)."""
-    categories, places = [], []
+    """terminal-hub's tab-separated lines → (categories, places with their sessions, orders: each
+    list group's session order, as "KEY:NAME"s)."""
+    categories, places, orders = [], [], {}
     for line in out.splitlines():
         f = line.split("\t")
-        if f[0] == "category" and len(f) >= 4:
+        if f[0] == "order" and len(f) >= 3:
+            orders[f[1]] = f[2:]
+        elif f[0] == "category" and len(f) >= 4:
             categories.append({"key": f[1], "label": f[2], "icon": f[3],
                                "editable": len(f) > 4 and f[4] == "page"})  # made on the page
         elif f[0] == "place" and len(f) >= 5:
@@ -79,7 +84,7 @@ def parse(out):
                 "category": f[8] if len(f) > 8 else "",
                 "path": f[9] if len(f) > 9 else "",  # the folder it started in
             })
-    return categories, places
+    return categories, places, orders
 
 
 def refresh(key):
@@ -113,12 +118,12 @@ def snapshot(fresh=None):
     """The list, as JSON. fresh: None, True (every place) or a set of place keys."""
     now = time.monotonic()
     with state:
-        stamp = tuple(os.stat(f).st_mtime_ns if os.path.exists(f) else 0 for f in (CONFIG, CATEGORIES))
-        if stamp != config["stamp"]:  # read the config (categories, places) when it changes
-            categories, places = parse(run("--config", timeout=10))
+        stamp = tuple(os.stat(f).st_mtime_ns if os.path.exists(f) else 0 for f in (CONFIG, CATEGORIES, ORDER))
+        if stamp != config["stamp"]:  # read the config (categories, places, orders) when it changes
+            categories, places, orders = parse(run("--config", timeout=10))
             config["stamp"] = stamp
             if places:  # a broken config keeps the last good one
-                config.update(categories=categories, places=places)
+                config.update(categories=categories, places=places, orders=orders)
         keys = [p["key"] for p in config["places"]]
         for k in set(lists) - set(keys):
             del lists[k]
@@ -148,7 +153,7 @@ def snapshot(fresh=None):
             if not waiting:
                 break
             state.wait(min(need[k][1] for k in waiting) - t)
-        body = {"categories": config["categories"], "places": [
+        body = {"categories": config["categories"], "orders": config["orders"], "places": [
             {**p, "state": lists[p["key"]]["state"], "sessions": lists[p["key"]]["sessions"]}
             for p in config["places"]]}
     return json.dumps(body, separators=(",", ":")).encode()

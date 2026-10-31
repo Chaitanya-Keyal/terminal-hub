@@ -31,6 +31,8 @@ const store = {
 const S = {
   places: /** @type {Place[] | null} */ (null),
   categories: /** @type {Category[]} */ ([]),
+  /** @type {Record<string, string[]>} each group's session order ("KEY:NAME"s), as you dragged it */
+  orders: {},
   /** @type {Set<string>} collapsed groups: "c:KEY" (a category) or "p:KEY" (a place) */
   collapsed: new Set(store.get('collapsed', [])),
   /** @type {string[]} targets ("KEY:NAME") in the panes, on wide screens */
@@ -164,9 +166,20 @@ function groups() {
   const items = (map, key) => map.get(key) ?? [];
   return [
     ...S.categories.filter(c => items(byCategory, c.key).length)
-      .map(c => ({ id: `c:${c.key}`, key: c.key, label: c.label, category: c, place: null, items: items(byCategory, c.key) })),
-    ...places.map(p => ({ id: `p:${p.key}`, key: p.key, label: p.label, category: null, place: p, items: items(byPlace, p.key) })),
+      .map(c => ({ id: `c:${c.key}`, key: c.key, label: c.label, category: c, place: null, items: inOrder(`c:${c.key}`, items(byCategory, c.key)) })),
+    ...places.map(p => ({ id: `p:${p.key}`, key: p.key, label: p.label, category: null, place: p, items: inOrder(`p:${p.key}`, items(byPlace, p.key)) })),
   ];
+}
+
+// A group's items in the order you dragged them into; ones not in it (new sessions) come after,
+// in tmux's order (by name).
+/** @param {string} id @param {Item[]} items */
+function inOrder(id, items) {
+  const order = S.orders[id];
+  if (!order?.length) return items;
+  const at = new Map(order.map((t, i) => [t, i]));
+  return items.map((it, i) => ({ it, rank: at.get(`${it.p.key}:${it.s.name}`) ?? order.length + i }))
+    .sort((a, b) => a.rank - b.rank).map(x => x.it);
 }
 
 function placeItems() {
@@ -270,7 +283,12 @@ function sessionRow(p, s, showPlace) {
   return h('div', {
     class: `row${open ? ' open' : ''}${t === focused() ? ' focused' : ''}${ok ? '' : ' off'}`, role: 'listitem',
     style: `--c:${p.colour}`,  // the open marker's colour, also in a category
-    oncontextmenu: e => { if (!wide() || s.starting) return; e.preventDefault(); sessionMenu(t, { x: e.clientX, y: e.clientY }); },
+    oncontextmenu: e => {
+      if (drag) return e.preventDefault();  // a long press on a phone picks the row up instead
+      if (!wide() || s.starting) return;
+      e.preventDefault();
+      sessionMenu(t, { x: e.clientX, y: e.clientY });
+    },
   },
   main,
   wide() && ok && iconBtn('columns-2', 'Open beside', () => openBeside(t), 'row-split'),
@@ -325,8 +343,10 @@ function continueCard(t) {
     h('span', { class: 'continue-text' }, h('small', {}, 'Continue'), h('b', {}, nameOf(t)), h('span', { class: 'continue-place' }, labelOf(t))));
 }
 
-// Rebuild the visible list, keeping focus (and the cursor) in the new-session field.
+// Rebuild the visible list, keeping focus (and the cursor) in the new-session field. Not while a
+// row is being dragged: that happens once it's dropped.
 function renderLists() {
+  if (drag) { drag.stale = true; return; }
   const list = wide() ? ui.sideList : ui.homeList;
   const active = /** @type {HTMLInputElement | null} */ (document.activeElement);
   const keep = active && list.contains(active) ? { el: active, k: active.dataset.k, from: active.selectionStart, to: active.selectionEnd } : null;
@@ -336,6 +356,144 @@ function renderLists() {
   const t = lastTarget();
   ui.cont.replaceChildren(...(!wide() && t && !S.filter ? [continueCard(t)] : []));
   for (const s of [sideSearch, homeSearch]) if (document.activeElement !== s.input) s.input.value = S.filter;
+}
+
+// ---- reordering: drag a session up or down its group ----------------------------------------
+// With a mouse, press and move; on a touch screen, hold it a moment first (a quick swipe still
+// scrolls). The row moves through its group as you go, and the list scrolls when you hold it near
+// an edge. Dropping it saves the group's order on the hub (terminal-hub --order), so every device
+// shows it. Not while the list is filtered, which shows only part of a group.
+/** @type {{row: HTMLElement, group: HTMLElement, id: string, y: number, moved: boolean, stale?: boolean, before?: string[], box?: HTMLElement | null, frame?: number} | null} */
+let drag = null;
+const rowsOf = group => /** @type {HTMLElement[]} */ ([...group.querySelectorAll(':scope > .row')]);
+const keyOfRow = row => /** @type {HTMLElement} */ (row.querySelector('.row-main')).dataset.k ?? '';
+
+// The row a press on TARGET would pick up, as a drag that hasn't moved yet, or null.
+/** @param {EventTarget | null} target @param {number} y */
+function pickUp(target, y) {
+  const el = /** @type {Element} */ (target);
+  const row = /** @type {HTMLElement | null} */ (el.closest?.('.row'));
+  const group = /** @type {HTMLElement | null} */ (row?.closest('.group') ?? null);
+  const id = /** @type {HTMLElement | null} */ (group?.querySelector('.group-toggle'))?.dataset.k;
+  if (!row || !group || !id || el.closest('.row-more, .row-split') || S.filter.trim()) return null;
+  return { row, group, id, y, moved: false };
+}
+
+function dragStart() {
+  if (!drag) return;
+  drag.moved = true;
+  drag.before = rowsOf(drag.group).map(keyOfRow);
+  drag.row.classList.add('dragging');
+  document.body.classList.add('reordering');
+  closeMenu();
+  let box = drag.row.parentElement;  // what scrolls: the sidebar's list, or the phone's home screen
+  while (box && !(/auto|scroll/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+  drag.box = box;
+  const tick = () => {
+    if (!drag?.moved) return;
+    const r = drag.box?.getBoundingClientRect();
+    if (drag.box && r) {
+      const step = drag.y < r.top + 48 ? -8 : drag.y > r.bottom - 48 ? 8 : 0;
+      if (step) { drag.box.scrollTop += step; dragTo(drag.y); }
+    }
+    drag.frame = requestAnimationFrame(tick);
+  };
+  drag.frame = requestAnimationFrame(tick);
+}
+
+// Move the dragged row past the neighbours whose middle the pointer (at Y) has crossed.
+/** @param {number} y */
+function dragTo(y) {
+  if (!drag) return;
+  drag.y = y;
+  const mid = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+  for (;;) {
+    const rows = rowsOf(drag.group), i = rows.indexOf(drag.row);
+    if (i > 0 && y < mid(rows[i - 1])) rows[i - 1].before(drag.row);
+    else if (i < rows.length - 1 && y > mid(rows[i + 1])) rows[i + 1].after(drag.row);
+    else break;
+  }
+}
+
+/** @param {boolean} save */
+function dragEnd(save) {
+  const d = drag;
+  if (!d) return;
+  drag = null;
+  cancelAnimationFrame(d.frame ?? 0);
+  document.body.classList.remove('reordering');
+  d.row.classList.remove('dragging');
+  const order = rowsOf(d.group).map(keyOfRow);
+  if (d.moved && save && order.join('\n') !== d.before?.join('\n')) {
+    S.orders = { ...S.orders, [d.id]: order };
+    runHub(['--order', d.id, ...order]).then(r => {
+      if (r.ok) return;
+      toast(r.message || "Couldn't save the order", 4500);
+      lastList = '';  // take the hub's order again
+      load();
+    });
+  }
+  if (d.moved || d.stale) renderLists();
+}
+
+for (const list of [ui.sideList, ui.homeList]) {
+  // A mouse (or pen): a press that moves is a drag, and the click it ends with doesn't open the row.
+  list.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch' || e.button !== 0 || drag) return;
+    drag = pickUp(e.target, e.clientY);
+    if (!drag) return;
+    const d = drag, y0 = e.clientY;
+    const move = ev => {
+      if (drag !== d) return done();
+      if (!d.moved && Math.abs(ev.clientY - y0) < 6) return;
+      if (!d.moved) dragStart();
+      dragTo(ev.clientY);
+    };
+    const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+    /** @param {Event | null} [ev] */
+    const done = (ev = null) => {
+      removeEventListener('pointermove', move);
+      removeEventListener('pointerup', done);
+      removeEventListener('pointercancel', done);
+      if (drag !== d) return;
+      if (d.moved) { addEventListener('click', swallow, true); setTimeout(() => removeEventListener('click', swallow, true)); }
+      dragEnd(ev?.type === 'pointerup');
+    };
+    addEventListener('pointermove', move);
+    addEventListener('pointerup', done);
+    addEventListener('pointercancel', done);
+  });
+  // A finger: hold still for a moment to pick the row up; moving sooner scrolls as usual.
+  list.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || drag) return;
+    const { clientX: x0, clientY: y0 } = e.touches[0];
+    drag = pickUp(e.target, y0);
+    if (!drag) return;
+    const d = drag;
+    const hold = setTimeout(() => {
+      if (drag !== d || !d.row.isConnected) return;
+      dragStart();
+      navigator.vibrate?.(15);
+    }, 400);
+    const move = ev => {
+      const t = ev.touches[0];
+      if (drag === d && d.moved) { ev.preventDefault(); dragTo(t.clientY); }
+      else if (Math.hypot(t.clientX - x0, t.clientY - y0) > 8) done(null);
+    };
+    /** @param {TouchEvent | null} ev */
+    const done = ev => {
+      clearTimeout(hold);
+      list.removeEventListener('touchmove', move);
+      list.removeEventListener('touchend', done);
+      list.removeEventListener('touchcancel', done);
+      if (drag !== d) return;
+      if (d.moved && ev?.cancelable) ev.preventDefault();  // no click on the row after a drag
+      dragEnd(ev?.type === 'touchend');
+    };
+    list.addEventListener('touchmove', move, { passive: false });
+    list.addEventListener('touchend', done);
+    list.addEventListener('touchcancel', done);
+  }, { passive: true });
 }
 
 // ---- opening and closing -----------------------------------------------------------------
@@ -583,6 +741,7 @@ function applyList(text) {
   const list = JSON.parse(text);
   lastList = text;
   S.categories = list.categories ?? [];
+  S.orders = list.orders ?? {};
   S.places = withStarting(list.places);
   notifyChanges();
   return true;
@@ -1038,6 +1197,7 @@ function renamed(old, t) {
   store.set('recent', S.recent);
   if (old in S.seen) { S.seen[t] = S.seen[old]; delete S.seen[old]; store.set('seen', S.seen); }
   if (S.trusted.delete(old)) S.trusted.add(t);
+  for (const order of Object.values(S.orders)) { const i = order.indexOf(old); if (i >= 0) order[i] = t; }  // as the hub does
   const s = sessionOf(old);
   if (s) s.name = nameOf(t);
   toast(`Renamed to ${nameOf(t)}`);
@@ -1123,6 +1283,11 @@ function toast(text, ms = 1800) {
 
 // ---- keyboard, history, layout changes ---------------------------------------------------
 addEventListener('keydown', e => {
+  if (e.key === 'Escape' && drag?.moved) {
+    e.preventDefault();
+    e.stopPropagation();
+    return dragEnd(false);
+  }
   if (e.key === 'Escape' && (help || menu || sheet || modal)) {
     e.preventDefault();
     e.stopPropagation();

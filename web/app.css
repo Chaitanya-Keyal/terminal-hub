@@ -131,6 +131,12 @@ kbd .icon { width: 12px; height: 12px; }
 .row-split { right: 30px; }
 .row:hover :is(.row-split, .row-more), :is(.row-split, .row-more):focus-visible { opacity: 1; }
 .row:hover .row-meta { visibility: hidden; }
+/* Reordering: the row being dragged stands out, and nothing gets selected meanwhile (on a phone,
+   holding a row is how a drag starts, so it mustn't select text or open the system's menu). */
+.row.dragging { z-index: 1; }
+.row.dragging .row-main { background: var(--raise-2); color: var(--text); box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+.reordering, .reordering * { cursor: grabbing; -webkit-user-select: none; user-select: none; }
+.touch .row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .wide .row:hover .row-main { padding-right: 62px; }
 .st { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .st-working { background: var(--working); animation: pulse 1.6s ease-in-out infinite; }

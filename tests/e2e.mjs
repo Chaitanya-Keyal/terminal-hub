@@ -154,6 +154,36 @@ try {
   await page.keyboard.press('Escape');
   check('... and so does Esc', await until(async () => (await page.locator('.popover').count()) === 0, 2000));
 
+  // Reordering: drag beta above alpha, in steps, as a hand would.
+  const from = await row(page, 'beta').boundingBox(), to = await row(page, 'alpha').boundingBox();
+  if (!from || !to) throw new Error('no rows to drag');
+  const x = from.x + 40, y0 = from.y + from.height / 2, y1 = to.y + to.height / 4;
+  await page.mouse.move(x, y0);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(x, y0 + ((y1 - y0) * i) / 8);
+  await page.mouse.up();
+  check('dragging a session moves it up its group', await until(async () => (await names(page)).join() === 'beta,alpha,gamma'), (await names(page)).join());
+  check('... without opening it', await row(page, 'alpha').evaluate(el => el.classList.contains('focused')) && (await page.locator('#panes .pane').count()) === 1);
+  const orderFile = join(hub.home, '.config/terminal-hub/order');
+  const order = () => { try { return readFileSync(orderFile, 'utf8'); } catch { return ''; } };
+  check('... and the order is kept on the hub', await until(() => order().includes('p:laptop\tlaptop:beta\tlaptop:alpha\n')), JSON.stringify(order()));
+  const other = await context({ viewport: { width: 1280, height: 800 } });
+  const elsewhere = await other.newPage();
+  await elsewhere.goto(BASE);
+  check('... so another device shows it too', await until(async () => (await names(elsewhere)).join() === 'beta,alpha,gamma'), (await names(elsewhere)).join());
+  await other.close();
+  const renameTo = async (name, to) => {
+    await row(page, name).click({ button: 'right' });
+    await page.locator('.menu .menu-item', { hasText: 'Rename' }).click();
+    await page.locator('.menu .create-input').fill(to);
+    await page.keyboard.press('Enter');
+    await until(async () => (await names(page)).includes(to));
+  };
+  await renameTo('beta', 'beta-2');
+  check('a renamed session keeps its place', await until(async () => (await names(page)).join() === 'beta-2,alpha,gamma') && order().includes('laptop:beta-2\tlaptop:alpha'),
+    `${(await names(page)).join()} / ${JSON.stringify(order())}`);
+  await renameTo('beta-2', 'beta');
+
   tmux('laptop', 'new-session', '-d', '-s', 'my notes');  // tmux allows the space; the hub can't attach to it
   check("a session the hub can't open is dimmed", await until(() => row(page, 'my notes').evaluate(el => el.classList.contains('off'))));
   await row(page, 'my notes').locator('.row-main').click();
@@ -272,6 +302,21 @@ try {
   check('phone: one tap switches back', await until(() => phone.locator('#topbar b', { hasText: 'alpha' }).isVisible()));
   await phone.goBack();
   check("phone: the browser's back goes to the list", await until(() => phone.locator('#home').isVisible()));
+  const homeNames = async () => (await phone.locator('#home .place', { hasText: 'laptop' }).locator('.row-name').allTextContents());
+  check('phone: the list has the order dragged on the desktop', (await homeNames()).join() === 'beta,alpha', (await homeNames()).join());
+  // Hold alpha a moment, then drag it above beta (touch events, as a finger makes them).
+  await row(phone, 'alpha', '#home').locator('.row-main').evaluate(async (el, beta) => {
+    const t = y => new Touch({ identifier: 1, target: el, clientX: 60, clientY: y });
+    const fire = (type, y) => el.dispatchEvent(new TouchEvent(type, {
+      touches: type === 'touchend' ? [] : [t(y)], changedTouches: [t(y)], bubbles: true, cancelable: true }));
+    const y0 = el.getBoundingClientRect().top + 10, y1 = /** @type {Element} */ (beta).getBoundingClientRect().top + 4;
+    fire('touchstart', y0);
+    await new Promise(r => setTimeout(r, 500));
+    for (let i = 1; i <= 5; i++) fire('touchmove', y0 + ((y1 - y0) * i) / 5);
+    fire('touchend', y1);
+  }, await row(phone, 'beta', '#home').elementHandle());
+  check('phone: holding a session, then dragging it, moves it', await until(async () => (await homeNames()).join() === 'alpha,beta'), (await homeNames()).join());
+  check('phone: ... without opening it', await phone.locator('#home').isVisible());
   await phone.locator('#home .place', { hasText: 'laptop' }).locator('.icon-btn.add').tap();
   await phone.locator('.create-input').fill('m1');
   await phone.locator('.create .btn.primary').tap();

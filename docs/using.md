@@ -5,8 +5,9 @@
 Click a session to open it. Shift+click, or the split button that appears on hover, opens it in a
 new pane beside the others (up to four). The ⋯ button next to a session, or a right-click on it,
 renames it, moves it to another category, or kills it (after asking), and for an open session
-sends a file. Click a group's name to collapse it (a collapsed one still shows a session that
-needs you). Press + by a place for a new session: type a name, or leave it blank for a shell.
+sends a file. Drag a session up or down to reorder its group. Click a group's name to collapse it
+(a collapsed one still shows a session that needs you). Press + by a place for a new session: type
+a name, or leave it blank for a shell.
 
 The keyboard button at the bottom of the sidebar lists the shortcuts, and common tmux keys after
 the open session's tmux prefix:
@@ -28,10 +29,14 @@ brings your layout back.
 
 Tap a session to open it, and use the back button (or the browser's) to return to the list. The
 ⋯ on each session, and the one in the top bar, rename, move or kill it; the top bar's also sends a
-file into the session. The swap button jumps to the last session. The key bar has what a phone
-keyboard lacks: esc, tab, shift-tab, ctrl (for the next key), ^C, arrows (they repeat while held)
-and paste. Swipes scroll tmux's history. The gear on the home screen sets the text size and turns
-notifications on. Add the page to your home screen to use it as an app.
+file into the session. To reorder a group, hold a session a moment, then drag it. The swap button
+jumps to the last session. The key bar has what a phone keyboard lacks: esc, tab, shift-tab, ctrl
+(for the next key), ^C, arrows (they repeat while held) and paste. Swipes scroll tmux's history.
+The gear on the home screen sets the text size and turns notifications on. Add the page to your
+home screen to use it as an app.
+
+The order you drag sessions into is kept on the hub (`~/.config/terminal-hub/order`), so every
+device shows it; new sessions join the end of their group, and a renamed one keeps its place.
 
 ## Sending files
 

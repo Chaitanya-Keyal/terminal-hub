@@ -15,8 +15,9 @@
 Everything runs on one machine, the hub. Each session you open in the page is its own connection
 to ttyd, which runs `terminal-hub KEY:NAME` to attach to that tmux session: directly, over ssh, or
 through sudo. When a session closes, `terminal-hub` tells the page why (you detached, the session
-ended, or the connection dropped), so the page can offer to reattach. Renaming, killing and
-moving a session run `terminal-hub --rename`, `--kill` and `--category` through ttyd the same way.
+ended, or the connection dropped), so the page can offer to reattach. Renaming, killing, moving
+and reordering sessions run `terminal-hub --rename`, `--kill`, `--category` and `--order` through
+ttyd the same way.
 
 The list comes from `terminal-hub --list KEY`, which `server.py` runs for each place on its own, so
 a slow place doesn't delay the others; ssh connections are reused for a minute. Open pages get
@@ -30,8 +31,9 @@ ttyd gives a shell to anyone who can reach it, so both services listen on 127.0.
 them only through something that authenticates. Other websites can't use your browser to get in:
 ttyd runs with `--check-origin`, so it takes terminals only from the hub's own page, and
 `server.py` makes the same check before saving a file you send. Everything else that changes
-something (opening, creating, renaming or killing a session) goes through ttyd. The session list
-(`/assets/sessions.json`) shows session names; it's published the same way as the rest.
+something (opening, creating, renaming, killing or reordering sessions) goes through ttyd. The
+session list (`/assets/sessions.json`) shows session names; it's published the same way as the
+rest.
 
 ## Working on it
 

@@ -15,6 +15,7 @@
 #   terminal-hub --new-category LABEL ICON [PATTERN...]   make a category (the page does this)
 #   terminal-hub --edit-category KEY LABEL ICON           rename one made that way
 #   terminal-hub --delete-category KEY                    and remove it
+#   terminal-hub --order GROUP KEY:NAME...   the order of a group's sessions (dragged on the page)
 #   terminal-hub --receive KEY FILENAME   save stdin as a file in place KEY, print its path (the
 #                              page's "Send a file", through server.py)
 #   terminal-hub --check       check the setup: tools, config, every place, services
@@ -75,6 +76,10 @@ if [[ -f $CATS ]]; then
     CAT_PAGE[-1]=1
   done <"$CATS"
 fi
+# The order you dragged sessions into on the page, per group of the list ("c:KEY" a category,
+# "p:KEY" a place), also a data file: GROUP, then KEY:NAME..., tab-separated, one group per line.
+ORDER=${CONFIG%/*}/order
+ORDER_RE=$'^[cp]:[A-Za-z0-9_-]{1,32}\t'
 
 # Listing reuses one ssh connection per place for a minute, so the page can refresh often.
 LIST_SSH=(-o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o "ControlPath=$RUN/ssh-%C"
@@ -138,12 +143,15 @@ category_of() {
 # The page's list: the categories, then each place (all, or the indexes given) and its sessions.
 # With LIST=0 (--config), places come without sessions and with the state "pending".
 cmd_list() {
-  local i c st name win att prefix path cat state at CAT want=("$@")
+  local i c st name win att prefix path cat state at CAT line want=("$@")
   ((${#want[@]})) || want=("${!KEY[@]}")
   for c in "${!CAT_KEY[@]}"; do
     printf 'category\t%s\t%s\t%s\t%s\n' "${CAT_KEY[c]}" "${CAT_LABEL[c]}" "${CAT_ICON[c]}" \
       "$( ((CAT_PAGE[c])) && echo page || echo config)"
   done
+  if [[ -f $ORDER ]]; then
+    while IFS= read -r line; do [[ $line =~ $ORDER_RE ]] && printf 'order\t%s\n' "$line"; done <"$ORDER"
+  fi
   ((LIST)) && list_all "${want[@]}"
   for i in "${want[@]}"; do
     st=pending
@@ -255,6 +263,7 @@ cmd_rename() {
   session "${1:-}"
   [[ ${2:-} =~ $NAME_RE ]] || answer 1 "the new name: $NAME_RULE"
   out=$(in_place "$I" "tmux rename-session -t $(q "=$NAME") $2" 2>&1) || answer 1 "$out"
+  order_rename "${KEY[I]}:$NAME" "${KEY[I]}:$2"
   answer 0
 }
 
@@ -266,25 +275,27 @@ cmd_category() {
   answer 0
 }
 
-# Page-made categories (the CATS file). Writes take a lock on the config's folder, and replace the
-# file in one step.
-cats_lock() { exec 9<"${CATS%/*}" && { command -v flock >/dev/null || return 0; flock 9; }; }
-# cats_put KEY [LINE]: KEY's line becomes LINE (or goes, without one); a new KEY's is added.
-cats_put() {
+# The data files (CATS, ORDER). Writes take a lock on the config's folder, and replace the file in
+# one step.
+data_lock() {
+  mkdir -p "${CONFIG%/*}" && exec 9<"${CONFIG%/*}" && { command -v flock >/dev/null || return 0; flock 9; }
+}
+# data_put FILE KEY [LINE]: KEY's line becomes LINE (or goes, without one); a new KEY's is added.
+data_put() {
   local tmp line found=0
-  tmp=$(mktemp "$CATS.XXXXXX") || return 1
-  if [[ -f $CATS ]]; then
+  tmp=$(mktemp "$1.XXXXXX") || return 1
+  if [[ -f $1 ]]; then
     while IFS= read -r line || [[ -n $line ]]; do
-      if [[ ${line%%$'\t'*} == "$1" ]]; then
-        ((found)) || [[ -z ${2:-} ]] || printf '%s\n' "$2"
+      if [[ ${line%%$'\t'*} == "$2" ]]; then
+        ((found)) || [[ -z ${3:-} ]] || printf '%s\n' "$3"
         found=1
       else
         printf '%s\n' "$line"
       fi
-    done <"$CATS" >"$tmp"
+    done <"$1" >"$tmp"
   fi
-  ((found)) || [[ -z ${2:-} ]] || printf '%s\n' "$2" >>"$tmp"
-  mv "$tmp" "$CATS"
+  ((found)) || [[ -z ${3:-} ]] || printf '%s\n' "$3" >>"$tmp"
+  mv "$tmp" "$1"
 }
 valid_label() { [[ -n $1 && ${#1} -le 40 && $1 != *[[:cntrl:]]* ]]; }
 # A Lucide name, or something short like an emoji.
@@ -299,12 +310,12 @@ cmd_new_category() {
   while [[ $base == *--* ]]; do base=${base//--/-}; done
   base=${base#-} base=${base%-} base=${base:0:24}
   [[ -n $base ]] || base=category
-  cats_lock || answer 1 "can't lock ${CATS%/*}"
+  data_lock || answer 1 "can't lock ${CONFIG%/*}"
   key=$base
   while category_index "$key" >/dev/null || grep -q "^$key"$'\t' "$CATS" 2>/dev/null; do key=$base-$((i++)); done
   line=$key$'\t'$label$'\t'$icon
   for p in "${@:3}"; do line+=$'\t'$p; done
-  cats_put "$key" "$line" || answer 1 "can't write $CATS"
+  data_put "$CATS" "$key" "$line" || answer 1 "can't write $CATS"
   answer 0 "$key"
 }
 
@@ -321,15 +332,40 @@ cmd_edit_category() {
   valid_icon "${3:-}" || answer 1 "an icon name or an emoji"
   line=$1$'\t'$2$'\t'$3
   while IFS= read -r p; do [[ -n $p ]] && line+=$'\t'$p; done <<<"${CAT_PATS[C]}"
-  if ! cats_lock || ! cats_put "$1" "$line"; then answer 1 "can't write $CATS"; fi
+  if ! data_lock || ! data_put "$CATS" "$1" "$line"; then answer 1 "can't write $CATS"; fi
   answer 0
 }
 
 cmd_delete_category() {
   local C
   page_category "${1:-}"
-  if ! cats_lock || ! cats_put "$1"; then answer 1 "can't write $CATS"; fi
+  if ! data_lock || ! data_put "$CATS" "$1"; then answer 1 "can't write $CATS"; fi
   answer 0
+}
+
+# --order GROUP KEY:NAME...: the page's new order for one group of the list.
+cmd_order() {
+  local line=${1:-} t
+  [[ $line$'\t' =~ $ORDER_RE ]] || answer 1 "no group called '$line'"
+  (($# >= 2 && $# <= 501)) || answer 1 "1 to 500 sessions"
+  for t in "${@:2}"; do
+    [[ $t =~ ^[A-Za-z0-9_-]+:. && ${#t} -le 100 && $t != *[[:cntrl:]]* ]] || answer 1 "no session called '$t'"
+    line+=$'\t'$t
+  done
+  if ! data_lock || ! data_put "$ORDER" "$1" "$line"; then answer 1 "can't write $ORDER"; fi
+  answer 0
+}
+
+# order_rename OLD NEW: a renamed session keeps its place in the order.
+order_rename() {
+  local tmp line f i
+  [[ -f $ORDER ]] && data_lock && tmp=$(mktemp "$ORDER.XXXXXX") || return 0
+  while IFS= read -r line || [[ -n $line ]]; do
+    IFS=$'\t' read -r -a f <<<"$line"
+    for i in "${!f[@]}"; do [[ ${f[i]} == "$1" ]] && f[i]=$2; done
+    (IFS=$'\t' && printf '%s\n' "${f[*]}")
+  done <"$ORDER" >"$tmp"
+  mv "$tmp" "$ORDER"
 }
 
 cmd_kill() {
@@ -445,13 +481,14 @@ case ${1:-} in
   --new-category) cmd_new_category "${@:2}" ;;
   --edit-category) cmd_edit_category "${2:-}" "${3:-}" "${4:-}" ;;
   --delete-category) cmd_delete_category "${2:-}" ;;
+  --order) cmd_order "${@:2}" ;;
   --existing) go "${2:-}" existing ;;
   --unlock) cmd_unlock "${2:-}" ;;
   --rename) cmd_rename "${2:-}" "${3:-}" ;;
   --kill) cmd_kill "${2:-}" ;;
   --receive) cmd_receive "${2:-}" "${3:-}" ;;
   --check) cmd_check ;;
-  -h | --help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' ;;
   '') cmd_pick ;;
   -*) die "unknown option $1 (see terminal-hub --help)" ;;
   *) go "$1" ;;

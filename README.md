@@ -18,7 +18,8 @@ a small Python server around [ttyd](https://github.com/tsl0922/ttyd) and
 
 - **One list across machines**, each with its own colour and icon. A place that can't be reached
   says so, and a slow one never holds up the rest.
-- **Categories** group sessions, say one per project, even across machines.
+- **Categories** group sessions, say one per project, even across machines, and you can drag
+  sessions into any order.
 - **Desktop:** a sidebar and up to four sessions side by side, switching instantly.
 - **Phone:** a home screen with every session, then one at a time with a key bar for what a phone
   keyboard lacks. It installs as an app.
