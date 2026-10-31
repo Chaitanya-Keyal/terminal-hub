@@ -244,6 +244,34 @@ try {
   check('a session that ends closes its pane, with a note', await until(async () => (await page.locator('#toast').textContent()).includes('renamed ended')),
     `toast: ${await page.locator('#toast').textContent()}; panes: ${await page.locator('#panes .pane').count()}; card: ${await page.locator('.term-card').allTextContents()}`);
 
+  // "! command" in the new-session field: the command is typed into the new session's shell.
+  const add = async text => {
+    await page.locator('#sidebar .place', { hasText: 'server' }).locator('.icon-btn.add').click();
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+  };
+  await add('! echo ran-$((6*7))');
+  check('"! command" makes a session named after its program', await until(() => sessions('server').includes('echo')), sessions('server').join());
+  check('... and runs the command in its shell', await until(() => screen('server', 'echo').includes('ran-42')), screen('server', 'echo'));
+  await add(`job ! echo "it's $((7*6))"`);
+  check('"NAME ! command" names it, and quotes get there intact', await until(() => sessions('server').includes('job') && screen('server', 'job').includes("it's 42")),
+    `${sessions('server').join()}: ${screen('server', 'job')}`);
+  await until(() => clients('server').includes('job'));
+  await page.locator('.pane.focused .xterm').click();
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('d');
+  await until(() => page.locator('.term-card', { hasText: 'Detached' }).isVisible());
+  await page.locator('.term-card button', { hasText: 'Reattach' }).click();
+  await until(async () => clients('server').includes('job') && !(await page.locator('.term-card').isVisible()));
+  await sleep(500);
+  check("... reattaching doesn't run it again", screen('server', 'job').split("it's 42").length === 2, screen('server', 'job'));
+  await add('job ! echo again');
+  check("... and a command never goes into a session that's there already", await until(async () => ((await page.locator('.create-error').textContent()) ?? '').includes('already')));
+  await page.keyboard.press('Escape');
+  tmux('server', 'kill-session', '-t', 'echo');
+  tmux('server', 'kill-session', '-t', 'job');
+  await until(async () => (await page.locator('#panes .pane').count()) === 0);
+
   const bell = page.locator('.side-foot button[aria-pressed]');
   await bell.click();
   check('the bell turns notifications on', await until(async () => (await bell.getAttribute('aria-pressed')) === 'true'));

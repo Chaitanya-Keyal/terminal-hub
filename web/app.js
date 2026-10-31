@@ -56,6 +56,8 @@ const S = {
 };
 /** @type {Map<string, TermView>} the live terminals */
 const views = new Map();
+/** @type {Map<string, string>} target → a command to type into it as it's created ("! command") */
+const runs = new Map();
 /** @type {HTMLFormElement | null} */ let createEl = null;
 /** @type {{close(): void} | null} */ let modal = null;
 /** @type {HTMLElement | null} */ let sheet = null, help = null, menu = null;
@@ -295,12 +297,16 @@ function sessionRow(p, s, showPlace) {
   !s.starting && iconBtn('ellipsis', `More for ${s.name}`, e => sessionMenu(t, e.currentTarget), 'row-more'));
 }
 
-function suggest(p) {
+// The first of BASE, BASE-2, BASE-3... that place P doesn't have yet.
+function suggest(p, base = 'shell') {
   const taken = new Set(p.sessions.map(s => s.name));
-  let name = 'shell', i = 2;
-  while (taken.has(name)) name = `shell-${i++}`;
+  let name = base, i = 2;
+  while (taken.has(name)) name = `${base}-${i++}`;
   return name;
 }
+// A name for a session that runs COMMAND: its program's, made fit for a name ("npx vite" → npx).
+const programOf = command => (command.split(/\s+/)[0].split('/').pop() ?? '')
+  .replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[-_]+|-+$/g, '').slice(0, 26) || 'shell';
 
 function startCreate(key) {
   const p = S.places?.find(x => x.key === key);
@@ -310,19 +316,29 @@ function startCreate(key) {
   S.creating = key;
   const fallback = suggest(p);
   const input = h('input', {
-    class: 'create-input', placeholder: `name (blank: ${fallback})`, maxLength: 32, autocomplete: 'off',
-    autocapitalize: 'off', spellcheck: false, enterKeyHint: 'go', 'aria-label': `Name for the new session on ${p.label}`,
+    class: 'create-input', placeholder: 'name, or ! command', maxLength: 500, autocomplete: 'off',
+    autocapitalize: 'off', spellcheck: false, enterKeyHint: 'go',
+    'aria-label': `Name for the new session on ${p.label} (blank: ${fallback}), and ! then a command to run in it`,
     onkeydown: e => { if (e.key === 'Escape') { e.preventDefault(); cancelCreate(); } },
     oninput: () => { err.textContent = ''; },
   });
   const err = h('div', { class: 'create-error', role: 'alert' });
+  const fail = text => { err.textContent = text; input.focus(); };
   createEl = h('form', {
     class: 'create',
+    // "NAME", "! COMMAND" or "NAME ! COMMAND": the command is typed into the new session's shell.
     onsubmit: e => {
       e.preventDefault();
-      const name = input.value.trim().replace(/\s+/g, '-') || fallback;
-      if (!NAME_RE.test(name)) { err.textContent = 'Use letters, digits, - and _ (up to 32).'; input.focus(); return; }
-      openSession(`${p.key}:${name}`);
+      const text = input.value.trim(), bang = text.indexOf('!');
+      const run = bang < 0 ? '' : text.slice(bang + 1).trim();
+      const typed = (bang < 0 ? text : text.slice(0, bang)).trim().replace(/\s+/g, '-');
+      if (bang >= 0 && !run) return fail('Type the command to run after the !.');
+      const name = typed || (run ? suggest(p, programOf(run)) : fallback);
+      if (!NAME_RE.test(name)) return fail('Use letters, digits, - and _ (up to 32).');
+      const t = `${p.key}:${name}`;
+      if (run && exists(t)) return fail(`There's a session called ${name} already.`);
+      if (run) runs.set(t, run);
+      openSession(t);
     },
   }, h('div', { class: 'create-row' }, input,
     h('button', { type: 'submit', class: 'btn primary' }, 'Create'),
@@ -587,8 +603,11 @@ function focusTerm() {
 function viewFor(t) {
   let v = views.get(t);
   if (!v) {
-    // Only a session you opened yourself may be created; reconnecting never recreates one.
-    v = new TermView(S.trusted.has(t) ? [t] : ['--existing', t], {
+    // Only a session you opened yourself may be created; reconnecting never recreates one (nor
+    // runs its command again).
+    const run = runs.get(t);
+    runs.delete(t);
+    v = new TermView(S.trusted.has(t) ? [t, ...(run ? [run] : [])] : ['--existing', t], {
       fontSize: S.fontSize, renderer: store.get('renderer', 'webgl'),
       ctrl: () => S.ctrl, ctrlUsed: () => { S.ctrl = false; bar.setCtrl(false); },
       copied: () => toast('Copied'),

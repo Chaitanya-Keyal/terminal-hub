@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # terminal-hub: the tmux sessions of every place in ~/.config/terminal-hub/config.
 #
-#   terminal-hub KEY:NAME      attach to session NAME on place KEY, creating it if needed
-#                              (NAME alone: the first place). The page's terminals run this.
+#   terminal-hub KEY:NAME [COMMAND]   attach to session NAME on place KEY, creating it if needed
+#                              (NAME alone: the first place), and then typing COMMAND into its new
+#                              shell. The page's terminals run this.
 #   terminal-hub --existing KEY:NAME   the same, but only if the session still exists (the page
 #                              uses this to reconnect, so it never recreates an ended session)
 #   terminal-hub --list [KEY...]   the categories, then every place (or just these) and its
@@ -172,11 +173,13 @@ cmd_list() {
 find_place() { index_of "$1" "${KEY[@]}"; }
 
 # Shell code, run in the place, that attaches to session $1 (creating it in that user's home:
-# $HOME expands there), then says why it closed: it looks the session up by id, which survives a
-# rename. It lingers a moment after that, or ttyd may notice the exit before it sends the last
-# output. No single quotes: attach may wrap it in them.
+# $HOME expands there, and typing command $3 into its shell), then says why it closed: it looks the
+# session up by id, which survives a rename. It lingers a moment after that, or ttyd may notice the
+# exit before it sends the last output. No single quotes: attach may wrap it in them (and the
+# command goes as base64 for that reason).
 attach_cmd() {
   local osc='printf "\033]7766;%s\007"' missing="tmux new-session -d -s $1 -c \"\$HOME\""
+  [[ -n ${3:-} ]] && missing="{ $missing && tmux send-keys -t =$1: -l -- \"\$(printf %s $(printf %s "$3" | base64 -w0) | base64 -d)\" && tmux send-keys -t =$1: Enter; }"
   [[ ${2:-} == existing ]] && missing="{ $osc ended; sleep 0.5; exit 0; }"
   printf '%s' "tmux has-session -t =$1 2>/dev/null || $missing;" \
     " id=\$(tmux display-message -p -t =$1: \"#{session_id}\"); [ -n \"\$id\" ] || id==$1;" \
@@ -184,10 +187,10 @@ attach_cmd() {
     " if tmux has-session -t \"\$id\" 2>/dev/null; then $osc detached; else $osc ended; fi; sleep 0.5"
 }
 
-# attach I NAME [existing]: attach this terminal to session NAME in place I.
+# attach I NAME [existing] [COMMAND]: attach this terminal to session NAME in place I.
 attach() {
   local a cmd
-  cmd=$(attach_cmd "$2" "${3:-}")
+  cmd=$(attach_cmd "$2" "${3:-}" "${4:-}")
   read -ra a <<<"${ARGS[$1]}"
   case ${KIND[$1]} in
     local) exec sh -c "$cmd" ;;
@@ -217,12 +220,14 @@ target() {
   I=$(find_place "${1%%:*}")
 }
 
-# go NAME | KEY:NAME | KEY:new [existing]
+# go NAME | KEY:NAME | KEY:new [existing] [COMMAND]
 go() {
   target "$1" || die "no place called ${1%%:*} in $CONFIG"
   [[ $NAME == new ]] && NAME=$(list "$I" | unique)
   [[ $NAME =~ $NAME_RE ]] || die "session name '$NAME': $NAME_RULE"
-  attach "$I" "$NAME" "${2:-}"
+  local run=${3:-}
+  [[ ${#run} -le 1000 && $run != *[[:cntrl:]]* ]] || die "the command: one line, up to 1000 characters"
+  attach "$I" "$NAME" "${2:-}" "$run"
 }
 
 # in_place I CODE: run a short command line in place I, without a terminal. CODE goes through
@@ -488,8 +493,8 @@ case ${1:-} in
   --kill) cmd_kill "${2:-}" ;;
   --receive) cmd_receive "${2:-}" "${3:-}" ;;
   --check) cmd_check ;;
-  -h | --help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' ;;
   '') cmd_pick ;;
   -*) die "unknown option $1 (see terminal-hub --help)" ;;
-  *) go "$1" ;;
+  *) go "$1" '' "${2:-}" ;;
 esac
