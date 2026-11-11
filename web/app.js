@@ -157,19 +157,29 @@ const bar = keyBar(ui.keys, {
 
 // The typing box (phones): a plain text field, so the keyboard's autocorrect and suggestions work
 // as in any app. Typing straight into the terminal can't take them: a picked suggestion arrives
-// as edits that come out as stray characters. Enter sends the line, and the box stays open.
+// as edits that come out as stray characters. Its text goes in where the cursor is, as if typed
+// (the keyboard's Enter does that); the buttons beside it add a new line (Alt+Enter, which Claude
+// Code reads as one) or press Enter, after typing what's in the box.
 const composeInput = h('input', {
-  type: 'text', placeholder: 'Type here; Enter sends it', enterKeyHint: 'send', autocapitalize: 'off',
-  'aria-label': 'Type a line for the session',
+  type: 'text', placeholder: 'Type here, then Enter to put it in', enterKeyHint: 'done', autocapitalize: 'off',
+  'aria-label': 'Text to type into the session',
 });
-ui.compose.append(composeInput,
-  h('button', { type: 'submit', title: 'Send it, with Enter', 'aria-label': 'Send it, with Enter' }, icon('corner-down-left')));
-ui.compose.addEventListener('submit', e => {
-  e.preventDefault();
-  focusedView()?.typeLine(composeInput.value);
+/** @param {string} [key] */
+const typeIn = key => {
+  focusedView()?.typeText(composeInput.value, key);
   composeInput.value = '';
   composeInput.focus();
-});
+};
+/** @param {string} name @param {string} title @param {string} key */
+const composeKey = (name, title, key) => {
+  const b = h('button', { type: 'button', title, 'aria-label': title, onclick: () => typeIn(key) }, icon(name));
+  b.addEventListener('mousedown', e => e.preventDefault());  // keep the keyboard up
+  return b;
+};
+ui.compose.append(composeInput,
+  composeKey('wrap-text', 'New line (Alt+Enter)', '\x1b\r'),
+  composeKey('corner-down-left', 'Enter', '\r'));
+ui.compose.addEventListener('submit', e => { e.preventDefault(); typeIn(); });
 /** @param {boolean} on */
 function setCompose(on) {
   S.compose = on;
@@ -767,9 +777,10 @@ function renderEmpty() {
 function render() {
   const w = wide();
   const vis = visible();
+  if (S.compose && !vis.length) { S.compose = false; bar.setCompose(false); }  // left the session
   document.body.className = [
     w ? 'wide' : 'narrow', TOUCH.matches && 'touch', w && !S.sidebar && 'side-hidden',
-    vis.length ? 'in-session' : 'no-session', `panes-${vis.length || 0}`,
+    vis.length ? 'in-session' : 'no-session', `panes-${vis.length || 0}`, S.compose && 'composing',
   ].filter(Boolean).join(' ');
   renderPanes();
   renderTop();
@@ -1375,7 +1386,7 @@ async function selectText(t) {
       area));
   sheet = wrap;
   document.body.append(wrap);
-  let text = '', from = 'Hold a word to select, then drag the handles';
+  let text = '', from = 'Hold to select, then drag';
   try {
     const r = await fetch(`/assets/capture?target=${encodeURIComponent(t)}`, { method: 'POST' });
     const answer = await r.json().catch(() => ({}));
@@ -1383,7 +1394,7 @@ async function selectText(t) {
     text = answer.text;
   } catch {
     text = views.get(t)?.screenText() ?? '';
-    from = "Only what's on screen: the session's history couldn't be read";
+    from = "Only the screen: its history couldn't be read";
   }
   if (sheet !== wrap) return;
   area.value = text.replace(/\s+$/, '');

@@ -41,10 +41,10 @@ jumps to the last session. The key bar has what a phone keyboard lacks: esc, tab
   drag the handles, Copy. **Copy all** takes everything.
 - **The typing box** (the last key): a plain text field above the key bar, so your keyboard's
   autocorrect and suggestions work as in any app (typing straight into a terminal can't take a
-  picked suggestion: it arrives as edits that come out as stray characters). Enter sends the line
-  and keeps the box open; an empty Enter just presses Enter. The key closes it.
-The gear on the home screen sets the text size and turns notifications on. Add the page to your
-home screen to use it as an app.
+  picked suggestion: it arrives as edits that come out as stray characters). The keyboard's Enter
+  puts the text in where the cursor is, as if typed, and nothing more. The buttons beside it add a
+  new line (Alt+Enter: a line break in Claude Code) or press Enter, after putting in what's in the
+  box. The key closes it.
 
 ## New sessions
 

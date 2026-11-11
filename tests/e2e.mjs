@@ -337,10 +337,19 @@ try {
   const composeKey = phone.locator('#keybar button[title^="Type a line"]');
   await composeKey.tap();
   check('phone: the typing box opens', await until(() => phone.locator('#compose input').isVisible()));
-  await phone.locator('#compose input').fill('echo typed-$((40+2))');
+  await phone.locator('#compose input').fill('echo typed-');
   await phone.locator('#compose input').press('Enter');
-  check('phone: Enter sends the typed line, and runs it', await until(() => screen('laptop', 'alpha').includes('\ntyped-42')), screen('laptop', 'alpha'));
+  check("phone: the keyboard's Enter types the text in, without pressing Enter", await until(() => screen('laptop', 'alpha').includes('echo typed-')) &&
+    !(await until(() => screen('laptop', 'alpha').includes('\ntyped-'), 800)), screen('laptop', 'alpha'));
   check('phone: ... and the box stays open, empty', (await phone.locator('#compose input').inputValue()) === '' && await phone.locator('#compose input').isVisible());
+  await phone.locator('#compose input').fill('$((40+2))');
+  await phone.locator('#compose button[title="Enter"]').tap();
+  check('phone: the Enter button types the rest, then presses Enter', await until(() => screen('laptop', 'alpha').includes('\ntyped-42')), screen('laptop', 'alpha'));
+  check('phone: the box also has a new-line (Alt+Enter) button', await phone.locator('#compose button[title^="New line"]').isVisible());
+  tmux('laptop', 'new-session', '-d', '-s', 'delta');  // the list changes, and the page redraws
+  check('phone: ... and the box survives the page redrawing', await until(() => phone.locator('#home .row-name', { hasText: 'delta' }).count().then(n => n > 0)) &&
+    await phone.locator('#compose input').isVisible() && (await composeKey.getAttribute('class'))?.includes('on'));
+  tmux('laptop', 'kill-session', '-t', 'delta');
   await composeKey.tap();
   check('phone: the key closes it again', await until(async () => !(await phone.locator('#compose').isVisible())));
   // Select text: the session's text in a plain text box, where the phone's own selection works.

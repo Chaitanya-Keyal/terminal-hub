@@ -52,9 +52,11 @@ kbd .icon { width: 12px; height: 12px; }
 }
 .icon-btn:hover { background: var(--raise-2); color: var(--text); }
 .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--line-2);
   background: var(--raise-2); color: var(--text); font-weight: 500; white-space: nowrap;
 }
+.btn .icon { width: 15px; height: 15px; flex: none; }
 .btn:hover { background: var(--raise-3); }
 .btn.primary { background: var(--accent); border-color: transparent; color: #08110a; font-weight: 600; }
 .btn.primary:hover { filter: brightness(1.08); }
@@ -330,9 +332,18 @@ kbd .icon { width: 12px; height: 12px; }
 #compose input:focus { outline: none; border-color: var(--focus); }
 #compose button {
   flex: none; width: 46px; height: 42px; display: grid; place-items: center; border-radius: 9px;
-  background: var(--focus); color: #fff;
+  background: var(--raise-2); color: var(--text-2); touch-action: manipulation;
 }
+#compose button:active { background: var(--raise-3); color: var(--text); }
 .touch.composing #keybar { border-top: 0; }
+
+/* Phones: a tapped button would keep its hover look, and its focus ring, after it's done. */
+@media (hover: none) {
+  .icon-btn:hover { background: none; }
+  .chip:hover, .continue:hover { background: var(--raise); }
+  .btn:hover { background: var(--raise-2); }
+}
+.touch button:focus-visible { outline: none; }
 
 /* ---- sheets, dialogs, toast ---- */
 .sheet-wrap { position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-end; background: rgba(0, 0, 0, .5); }
@@ -341,9 +352,12 @@ kbd .icon { width: 12px; height: 12px; }
   border-top: 1px solid var(--line-2); border-radius: 18px 18px 0 0; box-shadow: 0 -16px 48px rgba(0, 0, 0, .5);
 }
 .select-sheet { display: flex; flex-direction: column; max-height: 86vh; max-height: 86dvh; }
-.select-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.select-head > span { flex: 1; display: grid; gap: 2px; min-width: 0; }
-.select-head small { color: var(--muted); font-size: 12.5px; }
+.select-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.select-head > span { flex: 1; display: grid; gap: 3px; min-width: 0; }
+.select-head b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-head small { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+.narrow .select-head .btn { height: 38px; padding: 0 14px; border-radius: 10px; font-size: 14px; }
+.narrow .select-head .icon-btn { width: 38px; height: 38px; }
 .select-text {
   flex: 1; min-height: 40vh; width: 100%; padding: 10px; resize: none; border: 1px solid var(--line-2);
   border-radius: 10px; background: var(--bg); color: var(--text); white-space: pre; overflow: auto;

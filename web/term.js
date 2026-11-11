@@ -271,11 +271,13 @@ export class TermView {
 
   paste(text) { this.term.paste(text); }
 
-  // A line from the page's own typing box: the text, then Enter a moment later, so an app that
-  // reads quick input as a paste (Claude Code) still takes the Enter as "send".
-  typeLine(text) {
+  // Text from the page's own typing box, as if typed, then optionally a key (Enter, Alt+Enter) a
+  // moment later, so an app that reads quick input as a paste (Claude Code) still takes the key
+  // as a key.
+  /** @param {string} text @param {string} [key] */
+  typeText(text, key = '') {
     if (text) this.send(text);
-    setTimeout(() => this.send('\r'), text ? 40 : 0);
+    if (key) setTimeout(() => this.send(key), text ? 40 : 0);
   }
 
   // The text xterm holds (the screen, and its own scrollback), for "Select text" when the
