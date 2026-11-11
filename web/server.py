@@ -20,6 +20,10 @@ Sending a file: POST /send?place=KEY&name=FILENAME with the file as the body sav
 place (`terminal-hub --receive`) and answers {"path": ...}, which the page types into the
 session. Only the hub's own page may (its Origin is this host), as ttyd's --check-origin does for
 terminals: other websites can't send files through your browser.
+
+Selecting text: POST /capture?target=KEY:NAME answers {"text": ...}, the session's screen and
+recent history as plain text (`terminal-hub --capture`), for the page's "Select text". The same
+Origin rule applies.
 """
 import email.utils, http.server, json, mimetypes, os, signal, subprocess, sys, threading, time
 from urllib.parse import parse_qs, urlsplit
@@ -182,11 +186,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         path, _, query = self.path.partition("?")
-        if path != "/send":
+        if path not in ("/send", "/capture"):
             return self.reply(404, b"not found", "text/plain", "no-store")
         if urlsplit(self.headers.get("Origin", "")).netloc != self.headers.get("Host"):
-            return self.answer(403, error="only the hub's page may send files")
+            return self.answer(403, error="only the hub's page may do that")
         q = parse_qs(query)
+        if path == "/capture":
+            return self.capture(q.get("target", [""])[0])
         place, name = q.get("place", [""])[0], q.get("name", ["file"])[0]
         size = _int(self.headers.get("Content-Length", ""))
         if not 0 < size <= SEND_LIMIT:
@@ -216,6 +222,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if proc.returncode == 0 and path and not left:
             return self.answer(200, path=path)
         self.answer(500, error=err.decode(errors="replace").strip()[:200] or "couldn't save it")
+
+    def capture(self, target):
+        try:
+            r = subprocess.run([HUB, "--capture", target], capture_output=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return self.answer(500, error=str(e) or "no answer")
+        if r.returncode:
+            return self.answer(500, error=r.stderr.decode(errors="replace").strip()[:200] or "couldn't read it")
+        self.answer(200, text=r.stdout.decode(errors="replace"))
 
     def answer(self, code, **body):
         self.reply(code, json.dumps(body).encode(), "application/json", "no-store")

@@ -81,7 +81,7 @@ export class TermView {
     this.target = '';  // the page's name for the session (KEY:NAME); a rename changes it
     this.connections = 0;
     this.hooks = hooks;
-    this.status = 'connecting';  // connecting | open | reconnecting | detached | ended | unlocked | failed
+    this.status = 'connecting';  // connecting | open | reconnecting | detached | refused | ended | unlocked | failed
     this.reason = '';            // why the last connection closed, from the attach (OSC 7766)
     this.retries = 0;
     this.connecting = false;  // waiting for the auth token, before the socket exists
@@ -210,9 +210,9 @@ export class TermView {
   }
 
   // The connection closed. ttyd doesn't say why (its close code is the same either way), but the
-  // attach does, in its last output: detached, ended, unlocked or failed are final. No reason, or
-  // "lost", means the network: try again (quickly at first, then every 10 s). xterm parses output
-  // a moment after it arrives, so let it catch up before reading the reason.
+  // attach does, in its last output: detached, refused, ended, unlocked or failed are final. No
+  // reason, or "lost", means the network: try again (quickly at first, then every 10 s). xterm
+  // parses output a moment after it arrives, so let it catch up before reading the reason.
   closed() {
     this.ws = null;
     if (this.disposed) return;
@@ -270,6 +270,21 @@ export class TermView {
   arrow(dir) { return (this.term.modes.applicationCursorKeysMode ? '\x1bO' : '\x1b[') + dir; }
 
   paste(text) { this.term.paste(text); }
+
+  // A line from the page's own typing box: the text, then Enter a moment later, so an app that
+  // reads quick input as a paste (Claude Code) still takes the Enter as "send".
+  typeLine(text) {
+    if (text) this.send(text);
+    setTimeout(() => this.send('\r'), text ? 40 : 0);
+  }
+
+  // The text xterm holds (the screen, and its own scrollback), for "Select text" when the
+  // session's history can't be read.
+  screenText() {
+    const b = this.term.buffer.active, lines = [];
+    for (let i = 0; i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) ?? '');
+    return lines.join('\n');
+  }
   focus() { this.term.focus(); }
   setFontSize(px) { if (this.term.options.fontSize !== px) { this.term.options.fontSize = px; this.refit(); } }
 
@@ -301,8 +316,13 @@ export class TermView {
     const actions = this.hooks.actions(this);
     if (!actions) return;
     const box = Object.assign(document.createElement('div'), { className: 'term-card' });
-    const title = { detached: 'Detached', ended: 'Session ended', failed: 'Still locked', unlocked: 'Unlocked' }[status] ?? status;
+    const title = {
+      detached: 'Detached', refused: "Couldn't attach", ended: 'Session ended', failed: 'Still locked', unlocked: 'Unlocked',
+    }[status] ?? status;
     box.append(Object.assign(document.createElement('b'), { textContent: title }));
+    // tmux's own words (say "open terminal failed: ..."), its last line on the screen.
+    const why = status === 'refused' && this.screenText().split('\n').map(l => l.trim()).filter(Boolean).pop();
+    if (why) box.append(Object.assign(document.createElement('small'), { className: 'term-card-why', textContent: why }));
     const row = Object.assign(document.createElement('div'), { className: 'term-card-actions' });
     for (const [label, fn, primary] of actions) {
       const btn = Object.assign(document.createElement('button'), { className: primary ? 'btn primary' : 'btn', textContent: label });

@@ -19,11 +19,14 @@
 #   terminal-hub --order GROUP KEY:NAME...   the order of a group's sessions (dragged on the page)
 #   terminal-hub --receive KEY FILENAME   save stdin as a file in place KEY, print its path (the
 #                              page's "Send a file", through server.py)
+#   terminal-hub --capture KEY:NAME   print a session's text: the screen and up to 2000 lines of
+#                              history (the page's "Select text", through server.py)
 #   terminal-hub --check       check the setup: tools, config, every place, services
 #   terminal-hub               pick a session with fzf and attach (in an ordinary terminal)
 #
 # When a session closes, the attach tells the page why, with a private OSC 7766 sequence that
-# other terminals ignore: "detached", "ended", or "lost" (the connection to the place dropped).
+# other terminals ignore: "detached", "ended", "refused" (tmux wouldn't attach; its error is on the
+# screen) or "lost" (the connection to the place dropped).
 # The page's commands (--rename, --kill, the category ones) answer the same way: "ok[;MESSAGE]"
 # or "failed;MESSAGE".
 #
@@ -183,8 +186,9 @@ attach_cmd() {
   [[ ${2:-} == existing ]] && missing="{ $osc ended; sleep 0.5; exit 0; }"
   printf '%s' "tmux has-session -t =$1 2>/dev/null || $missing;" \
     " id=\$(tmux display-message -p -t =$1: \"#{session_id}\"); [ -n \"\$id\" ] || id==$1;" \
-    " tmux attach -t =$1;" \
-    " if tmux has-session -t \"\$id\" 2>/dev/null; then $osc detached; else $osc ended; fi; sleep 0.5"
+    " tmux attach -t =$1; s=\$?;" \
+    " if ! tmux has-session -t \"\$id\" 2>/dev/null; then $osc ended; elif [ \$s = 0 ]; then $osc detached;" \
+    " else $osc refused; fi; sleep 0.5"
 }
 
 # attach I NAME [existing] [COMMAND]: attach this terminal to session NAME in place I.
@@ -435,6 +439,11 @@ cmd_check() {
 # --receive KEY FILENAME: stdin into a file in place KEY, in a private folder for files sent from
 # the page; prints its path, for the page to type. The name keeps letters, digits, . - and _, and
 # gets a number in front if it's taken. The code goes through one shell there: no single quotes.
+cmd_capture() {
+  target "${1:-}" || die "no place called ${1%%:*}"
+  [[ -n $NAME && $NAME != *[[:cntrl:]]* ]] || die "no session named '$NAME'"
+  in_place "$I" "tmux capture-pane -p -J -S -2000 -t $(q "=$NAME:")"
+}
 cmd_receive() {
   local i a name code
   i=$(find_place "${1:-}") || die "no place called ${1:-}"
@@ -492,8 +501,9 @@ case ${1:-} in
   --rename) cmd_rename "${2:-}" "${3:-}" ;;
   --kill) cmd_kill "${2:-}" ;;
   --receive) cmd_receive "${2:-}" "${3:-}" ;;
+  --capture) cmd_capture "${2:-}" ;;
   --check) cmd_check ;;
-  -h | --help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h | --help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//' ;;
   '') cmd_pick ;;
   -*) die "unknown option $1 (see terminal-hub --help)" ;;
   *) go "$1" '' "${2:-}" ;;

@@ -52,6 +52,14 @@ const send = origin => new Promise(res => {
   req.end('x');
 });
 check('another site (or no page at all) can\'t send files', (await send('http://evil.example')) === 403 && (await send('')) === 403);
+// ... or read a session's text.
+const capture = origin => new Promise(res => {
+  const req = http.request(`${BASE}/assets/capture?target=laptop:alpha`, { method: 'POST', headers: origin ? { Origin: origin } : {} },
+    r => { r.resume(); res(r.statusCode); });
+  req.on('error', () => res(0));
+  req.end();
+});
+check("another site (or no page at all) can't read a session's text", (await capture('http://evil.example')) === 403 && (await capture('')) === 403);
 // Where files sent to the laptop place land, and what's on its screen (wrapped lines joined).
 const sent = name => join(hub.home, 'tmp-laptop', `terminal-hub-files-${process.getuid?.()}`, name);
 const readSent = name => { try { return readFileSync(sent(name), 'utf8'); } catch { return null; } };
@@ -223,6 +231,10 @@ try {
   await page.keyboard.press('Control+b');
   await page.keyboard.press('d');
   check('detaching shows a card', await until(() => page.locator('.term-card', { hasText: 'Detached' }).isVisible()));
+  check("... and nothing covers its buttons (xterm's layers stay under it)", await page.locator('.term-card button', { hasText: 'Reattach' }).evaluate(b => {
+    const r = b.getBoundingClientRect();
+    return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === b;
+  }));
   await page.locator('.term-card button', { hasText: 'Reattach' }).click();
   check('reattach works', await until(async () => clients('server').includes('shell') && !(await page.locator('.term-card').isVisible())));
 
@@ -315,12 +327,28 @@ try {
   await row(phone, 'alpha', '#home').locator('.row-main').tap();
   check('phone: a tap opens the session with a top bar', await until(() => phone.locator('#topbar b', { hasText: 'alpha' }).isVisible()));
   check('phone: the top bar has no stray text', !(await phone.locator('#topbar').textContent()).includes('undefined'));
-  check('phone: the key bar fits in one row', await phone.locator('#keybar').evaluate(el => el.scrollWidth <= el.clientWidth + 1 && el.children.length === 10));
+  check('phone: the key bar fits in one row', await phone.locator('#keybar').evaluate(el => el.scrollWidth <= el.clientWidth + 1 && el.children.length === 11));
   await phone.locator('.xterm').tap();
   await phone.keyboard.type('sleep 30\n');
   await until(() => tmux('laptop', 'display', '-p', '-t', 'alpha', '#{pane_current_command}') === 'sleep', 4000);
   await phone.locator('#keybar button[title="Ctrl+C"]').tap();
   check('phone: the ^C key interrupts', await until(() => tmux('laptop', 'display', '-p', '-t', 'alpha', '#{pane_current_command}') === 'bash'));
+  // The typing box: a plain field (the keyboard's autocorrect works there), Enter sends the line.
+  const composeKey = phone.locator('#keybar button[title^="Type a line"]');
+  await composeKey.tap();
+  check('phone: the typing box opens', await until(() => phone.locator('#compose input').isVisible()));
+  await phone.locator('#compose input').fill('echo typed-$((40+2))');
+  await phone.locator('#compose input').press('Enter');
+  check('phone: Enter sends the typed line, and runs it', await until(() => screen('laptop', 'alpha').includes('\ntyped-42')), screen('laptop', 'alpha'));
+  check('phone: ... and the box stays open, empty', (await phone.locator('#compose input').inputValue()) === '' && await phone.locator('#compose input').isVisible());
+  await composeKey.tap();
+  check('phone: the key closes it again', await until(async () => !(await phone.locator('#compose').isVisible())));
+  // Select text: the session's text in a plain text box, where the phone's own selection works.
+  await phone.locator('#topbar .select').tap();
+  check('phone: "Select text" shows the session\'s text', await until(async () => (await phone.locator('.select-text').inputValue()).includes('typed-42')));
+  check('phone: ... read from the session, not just the screen', !(await phone.locator('.select-head small').textContent()).includes('Only'));
+  await phone.locator('.select-head .icon-btn').tap();
+  check('phone: ... and it closes', await until(async () => (await phone.locator('.select-sheet').count()) === 0));
   await phone.locator('#topbar .back').tap();
   check('phone: back returns to the list', await until(() => phone.locator('#home').isVisible()));
   check('phone: the list offers to continue', await until(() => phone.locator('.continue', { hasText: 'alpha' }).isVisible()));

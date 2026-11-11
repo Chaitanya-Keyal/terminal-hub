@@ -50,6 +50,7 @@ const S = {
   creating: /** @type {string | null} */ (null),  // place key whose new-session field is open
   filter: '',
   ctrl: false,
+  compose: false,               // phones: the typing box above the key bar is open
   ready: false,                 // the first list has arrived
   /** @type {Set<string>} targets you opened yourself: safe to connect before the list */
   trusted: new Set(),
@@ -108,11 +109,12 @@ const ui = {
   top: h('header', { id: 'topbar' }), home: h('section', { id: 'home' }),
   empty: h('section', { id: 'empty' }), panes: h('div', { id: 'panes' }),
   keys: h('nav', { id: 'keybar', 'aria-label': 'Keys' }), park: h('div', { id: 'parking' }),
+  compose: h('form', { id: 'compose', autocomplete: 'off' }),
   toast: h('div', { id: 'toast', role: 'status' }),
   sideList: h('div', { class: 'list', role: 'list' }), homeList: h('div', { class: 'list', role: 'list' }),
   cont: h('div', { class: 'cont-slot' }),
 };
-ui.main = h('main', { id: 'main' }, ui.top, ui.home, ui.empty, ui.panes, ui.keys);
+ui.main = h('main', { id: 'main' }, ui.top, ui.home, ui.empty, ui.panes, ui.compose, ui.keys);
 document.body.append(h('div', { id: 'app' }, ui.side, ui.rail, ui.main, ui.park), ui.toast);
 
 function searchBox() {
@@ -150,7 +152,31 @@ ui.home.append(
 const bar = keyBar(ui.keys, {
   view: focusedView,
   ctrl: { get: () => S.ctrl, set: on => { S.ctrl = on; bar.setCtrl(on); } },
+  compose: () => setCompose(!S.compose),
 });
+
+// The typing box (phones): a plain text field, so the keyboard's autocorrect and suggestions work
+// as in any app. Typing straight into the terminal can't take them: a picked suggestion arrives
+// as edits that come out as stray characters. Enter sends the line, and the box stays open.
+const composeInput = h('input', {
+  type: 'text', placeholder: 'Type here; Enter sends it', enterKeyHint: 'send', autocapitalize: 'off',
+  'aria-label': 'Type a line for the session',
+});
+ui.compose.append(composeInput,
+  h('button', { type: 'submit', title: 'Send it, with Enter', 'aria-label': 'Send it, with Enter' }, icon('corner-down-left')));
+ui.compose.addEventListener('submit', e => {
+  e.preventDefault();
+  focusedView()?.typeLine(composeInput.value);
+  composeInput.value = '';
+  composeInput.focus();
+});
+/** @param {boolean} on */
+function setCompose(on) {
+  S.compose = on;
+  document.body.classList.toggle('composing', on);
+  bar.setCompose(on);
+  if (on) composeInput.focus(); else focusTerm();
+}
 
 // ---- the session list ----------------------------------------------------------------------
 // The list's groups, in order: the categories that have sessions, then every place with its
@@ -658,8 +684,8 @@ function viewFor(t) {
       },
       attached: view => load(keyOf(view.target)),
       files: (view, files) => sendFiles(view.target, files),
-      actions: view => view.status === 'detached'
-        ? [['Reattach', () => view.connect(), true], ['Close', () => closeTarget(view.target)]] : null,
+      actions: view => view.status === 'detached' || view.status === 'refused'
+        ? [[view.status === 'detached' ? 'Reattach' : 'Try again', () => view.connect(), true], ['Close', () => closeTarget(view.target)]] : null,
     }, ['--existing', t]);
     v.target = t;
     views.set(t, v);
@@ -724,6 +750,7 @@ function renderTop() {
     h('div', { class: 'top-title' }, placeMark(placeOf(t)), h('b', {}, nameOf(t)), h('small', {}, labelOf(t))),
     ...(lt ? [h('button', { type: 'button', class: 'last-btn', title: `Switch to ${nameOf(lt)}`, onclick: last },
       icon('arrow-left-right'), h('span', {}, nameOf(lt)))] : []),
+    iconBtn('text-select', 'Select text', () => selectText(t), 'select'),
     iconBtn('ellipsis', `More for ${nameOf(t)}`, e => sessionMenu(t, e.currentTarget), 'more'));
 }
 
@@ -1068,6 +1095,7 @@ function sessionMenu(t, at) {
     const choose = () => fill(title,
       wide() && openable(t) && !visible().includes(t) && item('columns-2', 'Open in a new pane', () => { closeMenu(); openBeside(t); }),
       views.get(t)?.status === 'open' && item('paperclip', 'Send a file…', () => { closeMenu(); pickFiles(files => sendFiles(t, files)); }),
+      item('text-select', 'Select text…', () => { closeMenu(); selectText(t); }),
       item('pencil', 'Rename', rename),
       item('tag', 'Move to category', pickCategory),
       item('trash-2', 'Kill session', () => kit.confirm(title, ['Kill ', h('b', {}, nameOf(t)), '? Everything running in it stops.'], 'Kill', async () => {
@@ -1325,6 +1353,43 @@ function pickFiles(then) {
   input.addEventListener('cancel', () => input.remove());
   document.body.append(input);
   input.click();
+}
+
+// ---- select text: a session's screen and recent history as plain text, where a phone's own
+// selection (hold, drag the handles, Copy) works. server.py's /capture runs terminal-hub
+// --capture on the session's machine; if that fails, xterm's own copy of the screen stands in.
+/** @param {string} t */
+async function selectText(t) {
+  closeSheet();
+  const area = h('textarea', { class: 'select-text', readOnly: true, wrap: 'off', spellcheck: false, 'aria-label': `Text of ${nameOf(t)}` });
+  const note = h('small', {}, 'Reading…');
+  const copy = h('button', {
+    type: 'button', class: 'btn', disabled: true,
+    onclick: () => navigator.clipboard?.writeText(area.value).then(() => toast('Copied'), () => toast("Couldn't copy")),
+  }, icon('copy'), 'Copy all');
+  const wrap = h('div', { class: 'sheet-wrap', onclick: e => { if (e.target === wrap) closeSheet(); } },
+    h('div', { class: 'sheet select-sheet', role: 'dialog', 'aria-label': 'Select text' },
+      h('div', { class: 'sheet-grip' }),
+      h('div', { class: 'select-head' }, h('span', {}, h('b', {}, nameOf(t)), note), copy,
+        iconBtn('x', 'Close', closeSheet)),
+      area));
+  sheet = wrap;
+  document.body.append(wrap);
+  let text = '', from = 'Hold a word to select, then drag the handles';
+  try {
+    const r = await fetch(`/assets/capture?target=${encodeURIComponent(t)}`, { method: 'POST' });
+    const answer = await r.json().catch(() => ({}));
+    if (!r.ok || typeof answer.text !== 'string') throw new Error(answer.error || `error ${r.status}`);
+    text = answer.text;
+  } catch {
+    text = views.get(t)?.screenText() ?? '';
+    from = "Only what's on screen: the session's history couldn't be read";
+  }
+  if (sheet !== wrap) return;
+  area.value = text.replace(/\s+$/, '');
+  note.textContent = from;
+  copy.disabled = !area.value;
+  area.scrollTop = area.scrollHeight;
 }
 
 let toastTimer;

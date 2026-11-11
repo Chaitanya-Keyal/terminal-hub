@@ -12,9 +12,9 @@ LUCIDE=1.65.0
 # Icons the page uses, then the ones for places and categories (config: icon, category; the
 # page's icon picker; docs/config.md lists them). Any other name shows as text, so an emoji works.
 UI_ICONS=(a-arrow-down a-arrow-up arrow-down arrow-left arrow-left-right arrow-right arrow-up
-  bell bell-off check chevron-left chevron-right clipboard-paste columns-2 ellipsis history
-  keyboard loader-circle lock panel-left paperclip pencil plus rotate-cw search settings
-  square-terminal tag trash-2 wifi-off x)
+  bell bell-off check chevron-left chevron-right clipboard-paste columns-2 copy corner-down-left
+  ellipsis history keyboard loader-circle lock panel-left paperclip pencil plus rotate-cw search
+  settings square-terminal tag text-cursor-input text-select trash-2 wifi-off x)
 PLACE_ICONS=(bitcoin book-open bot brain briefcase bug building-2 box chart-line cloud code
   coffee container cpu database flame flask-conical folder folder-git-2 gamepad-2 gem git-branch
   globe graduation-cap hammer hard-drive heart house key-round laptop layers leaf mail monitor

@@ -5,11 +5,12 @@ import { icon } from './icons.js';
 /** @typedef {import('./term.js').TermView} TermView */
 /**
  * @param {HTMLElement} el where the keys go
- * @param {{view: () => TermView | undefined, ctrl: {get(): boolean, set(on: boolean): void}}} opts
- *   view: the terminal keys are sent to; ctrl: the sticky ctrl state
+ * @param {{view: () => TermView | undefined, ctrl: {get(): boolean, set(on: boolean): void}, compose: () => void}} opts
+ *   view: the terminal keys are sent to; ctrl: the sticky ctrl state; compose: show or hide the
+ *   page's typing box
  */
-export function keyBar(el, { view, ctrl }) {
-  /** @type {{label?: string, icon?: string, title: string, send?: (v: TermView) => string, repeat?: boolean, toggle?: boolean, paste?: boolean}[]} */
+export function keyBar(el, { view, ctrl, compose }) {
+  /** @type {{label?: string, icon?: string, title: string, send?: (v: TermView) => string, repeat?: boolean, toggle?: boolean, paste?: boolean, compose?: boolean}[]} */
   const keys = [
     { label: 'esc', send: () => '\x1b', title: 'Escape' },
     { label: 'tab', send: () => '\t', title: 'Tab' },
@@ -21,8 +22,9 @@ export function keyBar(el, { view, ctrl }) {
     { icon: 'arrow-up', send: v => v.arrow('A'), repeat: true, title: 'Up' },
     { icon: 'arrow-right', send: v => v.arrow('C'), repeat: true, title: 'Right' },
     { icon: 'clipboard-paste', paste: true, title: 'Paste' },
+    { icon: 'text-cursor-input', compose: true, title: 'Type a line, with autocorrect' },
   ];
-  /** @type {HTMLButtonElement | null} */ let ctrlBtn = null;
+  /** @type {HTMLButtonElement | null} */ let ctrlBtn = null, composeBtn = null;
   for (const k of keys) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -31,6 +33,9 @@ export function keyBar(el, { view, ctrl }) {
     if (k.toggle) {
       ctrlBtn = b;
       b.onclick = () => ctrl.set(!ctrl.get());
+    } else if (k.compose) {
+      composeBtn = b;
+      b.onclick = compose;
     } else if (k.paste) {
       b.onclick = async () => {
         try { const t = await navigator.clipboard.readText(); if (t) view()?.paste(t); } catch {}
@@ -52,5 +57,12 @@ export function keyBar(el, { view, ctrl }) {
     b.addEventListener('mousedown', e => e.preventDefault());
     el.append(b);
   }
-  return { setCtrl(/** @type {boolean} */ on) { ctrlBtn?.classList.toggle('on', on); if (ctrlBtn) ctrlBtn.ariaPressed = String(on); } };
+  const show = (/** @type {HTMLButtonElement | null} */ b, /** @type {boolean} */ on) => {
+    b?.classList.toggle('on', on);
+    if (b) b.ariaPressed = String(on);
+  };
+  return {
+    setCtrl(/** @type {boolean} */ on) { show(ctrlBtn, on); },
+    setCompose(/** @type {boolean} */ on) { show(composeBtn, on); },
+  };
 }

@@ -4,8 +4,8 @@
 
 Click a session to open it. Shift+click, or the split button that appears on hover, opens it in a
 new pane beside the others (up to four). The ⋯ button next to a session, or a right-click on it,
-renames it, moves it to another category, or kills it (after asking), and for an open session
-sends a file. Drag sessions to reorder them or move them between groups (see Order, below).
+renames it, moves it to another category, kills it (after asking), shows its text to select
+(see Phone, below), and for an open session sends a file. Drag sessions to reorder them or move them between groups (see Order, below).
 Click a group's name to collapse it (a collapsed one still shows a session that needs you). Press +
 by a place for a new session (see below).
 
@@ -25,6 +25,9 @@ right-clicks (its own menu); Shift hands them to the page instead. On a Mac, use
 Shift. Recent sessions stay connected in the background, so switching is instant, and a reload
 brings your layout back.
 
+"Detached" on a terminal means you (or another tmux client) detached it: **Reattach** brings it
+back. "Couldn't attach" means tmux refused, with its reason under the title.
+
 ## Phone
 
 Tap a session to open it, and use the back button (or the browser's) to return to the list. The
@@ -32,6 +35,14 @@ Tap a session to open it, and use the back button (or the browser's) to return t
 file into the session. To drag a session, hold it a moment first. The swap button
 jumps to the last session. The key bar has what a phone keyboard lacks: esc, tab, shift-tab, ctrl
 (for the next key), ^C, arrows (they repeat while held) and paste. Swipes scroll tmux's history.
+
+- **Select text** (the top bar's text button, or ⋯, **Select text**): the session's screen and its
+  last 2000 lines of history as plain text, where your phone's own selection works: hold a word,
+  drag the handles, Copy. **Copy all** takes everything.
+- **The typing box** (the last key): a plain text field above the key bar, so your keyboard's
+  autocorrect and suggestions work as in any app (typing straight into a terminal can't take a
+  picked suggestion: it arrives as edits that come out as stray characters). Enter sends the line
+  and keeps the box open; an empty Enter just presses Enter. The key closes it.
 The gear on the home screen sets the text size and turns notifications on. Add the page to your
 home screen to use it as an app.
 
