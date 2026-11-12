@@ -74,7 +74,8 @@ restore_list() {
     [[ $kind == session && $name =~ $NAME_RE ]] || continue
     tmux has-session -t "=$name" 2>/dev/null && continue
     [[ $dir == /* && -d $dir ]] || dir=$HOME
-    tmux new-session -d -s "$name" -c "$dir" 2>/dev/null || continue
+    # Not with the lock: the first session starts the tmux server, which would keep it for good.
+    tmux new-session -d -s "$name" -c "$dir" 2>/dev/null 9<&- || continue
     [[ $cat =~ $NAME_RE || $cat == - ]] && tmux set-option -q -t "=$name:" @hub-category "$cat"
     if [[ $res =~ $RESUME_RE ]]; then
       tmux set-option -q -t "=$name:" @hub-resume "$res"
@@ -103,7 +104,7 @@ restore_list() {
 sync() {
   stopping && return 0
   mkdir -p "$STATE_DIR" && exec 9<"$STATE_DIR" || return 0
-  command -v flock >/dev/null && flock 9
+  if command -v flock >/dev/null; then flock -w 30 9 || return 0; fi
   boot=$(boot_id)
   local saved=''
   [[ -f $SAVED ]] && IFS=$'\t' read -r _ saved <"$SAVED"

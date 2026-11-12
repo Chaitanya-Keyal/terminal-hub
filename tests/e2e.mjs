@@ -368,7 +368,7 @@ try {
   await phone.goBack();
   check("phone: the browser's back goes to the list", await until(() => phone.locator('#home').isVisible()));
   const homeNames = async () => (await phone.locator('#home .place', { hasText: 'laptop' }).locator('.row-name').allTextContents());
-  check('phone: the list has the order dragged on the desktop', (await homeNames()).join() === 'beta,alpha', (await homeNames()).join());
+  check('phone: the list has the order dragged on the desktop', await until(async () => (await homeNames()).join() === 'beta,alpha'), (await homeNames()).join());
   // Hold alpha a moment, then drag it above beta (touch events, as a finger makes them).
   await row(phone, 'alpha', '#home').locator('.row-main').evaluate(async (el, beta) => {
     const t = y => new Touch({ identifier: 1, target: el, clientX: 60, clientY: y });

@@ -5,7 +5,7 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 dir=$(mktemp -d)
 # -S everywhere it matters: run inside tmux, a bare `tmux kill-server` would end your own server.
-trap 'tmux -S "$dir/sock" kill-server 2>/dev/null; rm -rf "$dir"' EXIT
+trap 'tmux -S "$dir/sock" kill-server 2>/dev/null; tmux -S "$dir/sock2" kill-server 2>/dev/null; rm -rf "$dir"' EXIT
 tmux -S "$dir/sock" -f /dev/null new-session -d -s t
 export TMUX="$dir/sock,0,0"
 # The saved session list goes here, never into your own; the boot is made up.
@@ -169,6 +169,13 @@ sleep 0.5
 if [[ ! -e $dir/pwned ]] && ! tmux has-session -t '=-x' 2>/dev/null && ! tmux capture-pane -p -t =bad1: | grep -qF touch
 then pass "a tampered list runs nothing"; else fail "a tampered list did something"; fi
 for s in agent sorted bad1; do tmux kill-session -t "=$s" 2>/dev/null; done
+
+# After a real restart there's no tmux server: the restore starts it, and must not leave it the lock.
+printf 'boot\told\nsession\tfresh\t/tmp\t.\t-\n' >"$saved"
+TMUX="$dir/sock2,0,0" HUB_STATE_BOOT=boot-5 bin/hub-state restore
+if TMUX="$dir/sock2,0,0" timeout 5 env HUB_STATE_BOOT=boot-5 bin/hub-state save; then pass "the tmux server a restore starts doesn't hold the lock"
+else fail "a save after a restore that started the tmux server waited for the lock"; fi
+tmux -S "$dir/sock2" kill-server 2>/dev/null
 
 if env -u TMUX -u TMUX_PANE bin/hub-state hook <<<'{}'; then pass "outside tmux: does nothing"; else fail "outside tmux: failed"; fi
 bin/hub-state bogus 2>/dev/null
