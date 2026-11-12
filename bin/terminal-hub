@@ -427,7 +427,10 @@ cmd_check() {
   if command -v systemctl >/dev/null; then
     echo "services"
     for t in terminal-hub terminal-hub-assets; do say "$t" "$(systemctl --user is-active "$t" 2>/dev/null)"; done
+    say restore "$(systemctl --user is-enabled terminal-hub-restore 2>/dev/null || echo 'not installed') (sessions back after a restart)"
   fi
+  if grep -qs 'terminal-hub/tmux.conf' "$HOME/.tmux.conf"; then say tmux "the hub's settings are in ~/.tmux.conf"
+  else say tmux "no hub settings in ~/.tmux.conf: sessions won't come back after a restart (docs/install.md)"; fi
   echo "ports (publish both through something that authenticates: docs/install.md)"
   for t in "ttyd $HUB_PORT" "files $((HUB_PORT + 1))"; do
     if (exec 3<>"/dev/tcp/127.0.0.1/${t#* }") 2>/dev/null; then say "${t% *}" "127.0.0.1:${t#* } answers"

@@ -36,6 +36,9 @@ Every hook runs `~/.local/bin/hub-state hook`, which reads the event and sets th
 - done when the turn ends (on an error too);
 - cleared when you stop Claude (Esc, or no to a permission) or it exits.
 
+They also note the conversation, so after a restart the session comes back with
+`claude --resume ID` typed in ([using.md](using.md#after-a-restart)).
+
 Claude Code has no hooks for answering a prompt or for stopping, so during a turn `hub-state`
 watches for those in the background: the prompt closing on screen, and the interruption in
 Claude's transcript. A subagent finishing its work doesn't hide a question the main agent is
@@ -54,3 +57,4 @@ its tmux pane even when OpenCode's server is the shared background service. inst
 
 The dot is working while one of the window's tabs is busy, waiting when one asks for a permission
 or a question, done when they finish, and cleared when you stop one with Esc or close OpenCode.
+It also notes the conversation on screen, for `opencode --session ID` after a restart.

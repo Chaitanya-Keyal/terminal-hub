@@ -44,8 +44,9 @@ Any other reverse proxy works if it authenticates you first and:
 
 ## The other machines
 
-The hub reaches them over ssh, so they need nothing more to be listed. For the status dots and
-the tmux settings there, run this on each (it needs tmux and python3, not ttyd):
+The hub reaches them over ssh, so they need nothing more to be listed. For the status dots, the
+tmux settings and sessions that come back after a restart, run this on each (it needs tmux and
+python3, not ttyd):
 
 ```sh
 git clone https://github.com/Chaitanya-Keyal/terminal-hub && cd terminal-hub
@@ -55,7 +56,8 @@ git clone https://github.com/Chaitanya-Keyal/terminal-hub && cd terminal-hub
 ## tmux settings
 
 Optional but recommended: they turn on mouse mode (for swipe scrolling and drag-to-copy), size
-windows to whichever screen you used last, and add a quiet status line tagged with the place. In
+windows to whichever screen you used last, add a quiet status line tagged with the place, and
+remember the sessions so a restart doesn't lose them ([using.md](using.md#after-a-restart)). In
 `~/.tmux.conf` on each machine:
 
 ```tmux
@@ -84,10 +86,14 @@ restarts ttyd, and open pages reconnect.
 | `~/.local/share/terminal-hub/` | the page, `server.py`, the tmux settings and the OpenCode plugin |
 | `~/.config/systemd/user/terminal-hub.service` | ttyd |
 | `~/.config/systemd/user/terminal-hub-assets.service` | `server.py` |
+| `~/.config/systemd/user/terminal-hub-restore.service` | brings sessions back after a restart (every machine) |
+| `~/.local/state/terminal-hub/sessions` | the sessions to bring back |
 | `$TMPDIR/terminal-hub-files-UID/` | files sent from the page, on the session's machine |
 
 install.sh writes the services for this machine (where it found ttyd, python3 and the tools
-terminal-hub runs, and `HUB_PORT`). For anything else, use a drop-in:
+terminal-hub runs, and `HUB_PORT`). On WSL they also get Windows' folders on PATH, as an ordinary
+terminal does, so sessions the hub opens can run Windows programs; run install.sh again after
+changing Windows' PATH. For anything else, use a drop-in:
 `systemctl --user edit terminal-hub`.
 
 ## Troubleshooting

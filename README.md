@@ -27,6 +27,8 @@ a small Python server around [ttyd](https://github.com/tsl0922/ttyd) and
   with notifications if you want them.
 - **Files into a session:** send a photo from your phone, or drop or paste one on a desktop; its
   path is typed into the session.
+- **Restarts don't lose sessions:** they come back in their folders, with the agent's resume
+  command typed in, ready for Enter.
 - **`share`** moves the terminal you're in into tmux, so it shows up in the list.
 
 ## Quick start

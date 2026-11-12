@@ -5,18 +5,135 @@
 #   hub-state working|waiting|done|clear   set the mark (from a script, or another agent's hooks)
 #   hub-state hook                         what Claude Code's hooks run: it reads the hook's event
 #                                          on stdin and picks the mark (integrations/claude-code.json)
+#   hub-state resume claude|opencode ID    the agent conversation this session would resume
+#   hub-state save                         remember this machine's sessions (the hub's tmux
+#                                          settings run it whenever a session starts, ends or
+#                                          is renamed)
+#   hub-state restore                      after a restart, bring back the sessions it ended (the
+#                                          terminal-hub-restore service runs it once per boot)
 #
 # The mark lives in options on the tmux session (@hub-state, and @hub-state-at for when it was
-# set), which the hub reads when it lists sessions. Outside tmux this does nothing.
+# set), which the hub reads when it lists sessions. Outside tmux the marks do nothing.
+#
+# Restoring: each session comes back with its name, folder and category, as a shell. If it was
+# running Claude Code or OpenCode, that agent's resume command is typed at the prompt but not
+# run: press Enter to pick up the conversation. A session ended on purpose stays ended.
 #
 # install.sh copies this to ~/.local/bin; edit the copy in the repo.
+
+# Session names the hub opens (as in terminal-hub), and conversation ids the agents give.
+NAME_RE='^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$'
+RESUME_RE='^(claude|opencode) ([A-Za-z0-9_-]{1,80})$'
+STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/terminal-hub
+SAVED=$STATE_DIR/sessions
+
+# The saved list belongs to one boot: a new one means a restart ended the sessions in it. (The
+# tests set HUB_STATE_BOOT.)
+boot_id() {
+  [ -n "${HUB_STATE_BOOT:-}" ] && { echo "$HUB_STATE_BOOT"; return; }
+  cat /proc/sys/kernel/random/boot_id 2>/dev/null || sysctl -n kern.boottime 2>/dev/null | tr -cd '0-9'
+}
+
+# stopping: the machine (or this user's systemd) may be shutting down. Sessions close one by one
+# then, as their programs are stopped: that mustn't empty the saved list. So with systemd, only a
+# state it answers and that isn't on the way down counts as up.
+stopping() {
+  command -v systemctl >/dev/null || return 1
+  local up='^(running|degraded|starting|initializing|maintenance)$' s rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  s=$(systemctl is-system-running 2>/dev/null)
+  [[ $s =~ $up || $s == offline ]] || return 0  # offline: this machine doesn't run systemd
+  [[ -S $rt/systemd/private ]] || return 1      # no user manager here
+  s=$(XDG_RUNTIME_DIR=$rt systemctl --user is-system-running 2>/dev/null)
+  ! [[ $s =~ $up ]]
+}
+
+# save_list: the sessions now, for this boot, replacing the saved list in one step. One line per
+# session: name, folder, category ("-" moved out of any, "." never moved: its folder decides),
+# resume (tab-separated, never run as code).
+save_list() {
+  local fmt=$'#{session_name}\t#{pane_current_path}\t=#{@hub-category}\t=#{@hub-resume}' name dir cat res tmp
+  tmp=$(mktemp "$SAVED.XXXXXX") || return 1
+  {
+    printf 'boot\t%s\n' "$boot"
+    tmux list-sessions -F "$fmt" 2>/dev/null | while IFS=$'\t' read -r name dir cat res; do
+      [[ $name =~ $NAME_RE ]] || continue
+      [[ $dir == /* && $dir != *[[:cntrl:]]* ]] || dir=''
+      cat=${cat#=} res=${res#=}
+      [[ $cat =~ $NAME_RE || $cat == - ]] || cat=''
+      [[ $res =~ $RESUME_RE ]] || res=''
+      printf 'session\t%s\t%s\t%s\t%s\n' "$name" "${dir:--}" "${cat:-.}" "${res:--}"
+    done
+  } >"$tmp" && mv "$tmp" "$SAVED"
+}
+
+# restore_list: bring back the sessions saved in an earlier boot that aren't running, then type
+# their agent's resume command once their shell shows its prompt (or after 10 s anyway).
+restore_list() {
+  local kind name dir cat res typed=() i n cmd left
+  while IFS=$'\t' read -r kind name dir cat res; do
+    [[ $kind == session && $name =~ $NAME_RE ]] || continue
+    tmux has-session -t "=$name" 2>/dev/null && continue
+    [[ $dir == /* && -d $dir ]] || dir=$HOME
+    tmux new-session -d -s "$name" -c "$dir" 2>/dev/null || continue
+    [[ $cat =~ $NAME_RE || $cat == - ]] && tmux set-option -q -t "=$name:" @hub-category "$cat"
+    if [[ $res =~ $RESUME_RE ]]; then
+      tmux set-option -q -t "=$name:" @hub-resume "$res"
+      typed+=("$name" "$res")
+    fi
+  done <"$SAVED"
+  left=$((${#typed[@]} / 2))
+  for ((n = 0; n <= 50 && left; n++)); do  # up to 10 s for the shells to start
+    ((n)) && sleep 0.2
+    for ((i = 0; i < ${#typed[@]}; i += 2)); do
+      [[ -n ${typed[i]} ]] || continue
+      ((n == 50)) || [[ $(tmux capture-pane -p -t "=${typed[i]}:" 2>/dev/null) == *[![:space:]]* ]] || continue
+      [[ ${typed[i + 1]} =~ $RESUME_RE ]]
+      case ${BASH_REMATCH[1]} in
+        claude) cmd="claude --resume ${BASH_REMATCH[2]}" ;;
+        opencode) cmd="opencode --session ${BASH_REMATCH[2]}" ;;
+      esac
+      tmux send-keys -t "=${typed[i]}:" -l -- "$cmd"
+      typed[i]='' left=$((left - 1))
+    done
+  done
+}
+
+# sync: what save and restore both do. The list a restart left behind is brought back before
+# anything new is saved over it, whichever runs first after the boot. One at a time.
+sync() {
+  stopping && return 0
+  mkdir -p "$STATE_DIR" && exec 9<"$STATE_DIR" || return 0
+  command -v flock >/dev/null && flock 9
+  boot=$(boot_id)
+  local saved=''
+  [[ -f $SAVED ]] && IFS=$'\t' read -r _ saved <"$SAVED"
+  [[ -n $saved && -n $boot && $saved != "$boot" ]] && restore_list
+  save_list
+}
+
+case ${1:-} in
+  save | restore) sync; exit 0 ;;
+esac
 
 if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
   [ "${1:-}" = hook ] && cat >/dev/null
   exit 0
 fi
 pane=$TMUX_PANE
-IFS='|' read -r cur waiter < <(tmux display-message -p -t "$pane" '#{@hub-state}|#{@hub-wait}' 2>/dev/null)
+IFS='|' read -r cur waiter resume < <(tmux display-message -p -t "$pane" '#{@hub-state}|#{@hub-wait}|#{@hub-resume}' 2>/dev/null)
+
+# remember KIND ID: the conversation this session resumes after a restart (saved when it changes).
+# KIND alone forgets it.
+remember() {
+  local want=''
+  [[ -n ${2:-} ]] && want="$1 $2"
+  [[ -z $want || $want =~ $RESUME_RE ]] || return
+  [[ $want == "$resume" ]] && return
+  if [[ -n $want ]]; then tmux set-option -q -t "$pane" @hub-resume "$want" 2>/dev/null
+  else tmux set-option -qu -t "$pane" @hub-resume 2>/dev/null; fi
+  resume=$want
+  (sync) </dev/null >/dev/null 2>&1
+}
 
 # mark STATE [WAITER]: set the mark; its time changes only when the state does. WAITER is the
 # agent a "waiting" belongs to (empty: anyone's tool finishing ends it).
@@ -85,13 +202,14 @@ watch_from_here() {
 # before the tool's input, and only that part is read: no JSON parser needed (quotes inside
 # strings are escaped), and a key inside a tool's input can't be taken for them.
 hook() {
-  local json event='' agent=main transcript=''
+  local json event='' agent=main transcript='' id=''
   json=$(head -c 8192)
   cat >/dev/null
   json=${json%%\"tool_input\"*}
   [[ $json =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"([A-Za-z]+)\" ]] && event=${BASH_REMATCH[1]}
   [[ $json =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && agent=${BASH_REMATCH[1]}
   [[ $json =~ \"transcript_path\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] && transcript=${BASH_REMATCH[1]}
+  [[ $json =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] && id=${BASH_REMATCH[1]}
   case $event in
     UserPromptSubmit) mark working; watch_from_here ;;
     # A permission dialog or a question is open (in auto mode: only when it does ask you).
@@ -103,13 +221,19 @@ hook() {
     Stop | StopFailure) mark "done" ;;
     SessionEnd) clear_mark ;;
   esac
+  # Then the conversation to resume after a restart (it changes with /clear, and goes when it
+  # ends): saving it may wait for a restore in progress, so the mark comes first.
+  if [[ $event == SessionEnd ]]; then remember claude
+  elif [[ -n $event && -n $id ]]; then remember claude "$id"; fi
 }
 
 case ${1:-} in
   working | waiting | done) mark "$1" ;;
   clear) clear_mark ;;
   hook) hook ;;
+  resume) [[ ${2:-} =~ ^(claude|opencode)$ ]] && remember "$2" "${3:-}" ;;
   watch) watch "${2:-}" "${3:-}" ;;  # started by hook
-  *) echo "usage: hub-state working|waiting|done|clear, or hub-state hook (see integrations/)" >&2; exit 2 ;;
+  *) echo "usage: hub-state working|waiting|done|clear|save|restore, hub-state resume claude|opencode [ID]," \
+       "or hub-state hook (see integrations/)" >&2; exit 2 ;;
 esac
 exit 0

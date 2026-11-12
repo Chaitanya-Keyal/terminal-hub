@@ -8,6 +8,8 @@ dir=$(mktemp -d)
 trap 'tmux -S "$dir/sock" kill-server 2>/dev/null; rm -rf "$dir"' EXIT
 tmux -S "$dir/sock" -f /dev/null new-session -d -s t
 export TMUX="$dir/sock,0,0"
+# The saved session list goes here, never into your own; the boot is made up.
+export XDG_STATE_HOME="$dir/state" HUB_STATE_BOOT=boot-1
 TMUX_PANE=$(tmux display-message -p -t t '#{pane_id}')
 export TMUX_PANE
 
@@ -99,6 +101,74 @@ expect "saying no and what to do instead: working" working/
 ev Stop
 stopped
 sleep 1.5;                        check "after the turn, nothing is watched" done/
+
+# Remembering the sessions, and bringing them back after a restart.
+saved="$dir/state/terminal-hub/sessions"
+ev UserPromptSubmit
+if [[ $(opt @hub-resume) == 'claude s' ]]; then pass "a prompt records the conversation to resume"; else fail "no conversation recorded: '$(opt @hub-resume)'"; fi
+if grep -qx $'session\tt\t[^\t]*\t.\tclaude s' "$saved"; then pass "a new conversation is saved at once"; else fail "not saved: $(cat "$saved")"; fi
+ev SessionEnd
+if [[ -z $(opt @hub-resume) ]]; then pass "the conversation ends: nothing to resume"; else fail "still resumes $(opt @hub-resume)"; fi
+
+mkdir -p "$dir/work"
+# Plain shells, not yours: your startup files might change folder or print things.
+tmux set-option -g default-command 'exec bash --norc --noprofile'
+tmux new-session -d -s plain -c "$dir/work"
+tmux new-session -d -s sorted -c "$dir"
+tmux set-option -t =sorted: @hub-category projects
+tmux new-session -d -s agent -c "$dir/work"
+tmux new-session -d -s out -c "$dir"
+tmux set-option -t =out: @hub-category -
+TMUX_PANE=$(tmux display-message -p -t =agent: '#{pane_id}') bin/hub-state resume claude abc-123
+TMUX_PANE=$(tmux display-message -p -t =agent: '#{pane_id}') bin/hub-state resume claude 'x; rm -rf ~'
+tmux new-session -d -s 'odd name'
+bin/hub-state save
+if [[ $(head -1 "$saved") == $'boot\tboot-1' ]] && grep -qx $'session\tplain\t'"$dir/work"$'\t.\t-' "$saved" &&
+  grep -qx $'session\tsorted\t'"$dir"$'\tprojects\t-' "$saved" && grep -qx $'session\tagent\t'"$dir/work"$'\t.\tclaude abc-123' "$saved" &&
+  grep -qx $'session\tout\t'"$dir"$'\t-\t-' "$saved"
+then pass "save: name, folder, category and conversation of each session"; else fail "save wrote: $(cat "$saved")"; fi
+if grep -q odd "$saved"; then fail "a name the hub can't open was saved"; else pass "names the hub can't open aren't saved"; fi
+
+bin/hub-state restore
+if [[ $(tmux ls -F '#S' | sort | tr '\n' ' ') == 'agent odd name out plain sorted t ' ]]; then pass "the same boot: restore changes nothing"
+else fail "the same boot: sessions now $(tmux ls -F '#S' | tr '\n' ' ')"; fi
+
+# A restart ends them all (here: all but t, the test's own).
+for s in plain sorted agent out 'odd name'; do tmux kill-session -t "=$s"; done
+HUB_STATE_BOOT=boot-2 bin/hub-state restore
+if [[ $(tmux ls -F '#S' | sort | tr '\n' ' ') == 'agent out plain sorted t ' ]]; then pass "a new boot: the saved sessions are back"
+else fail "after the restore: $(tmux ls -F '#S' | tr '\n' ' ')"; fi
+if [[ $(tmux display-message -p -t =plain: '#{pane_current_path}') == "$dir/work" ]]; then pass "back in their folder"; else fail "plain is in $(tmux display-message -p -t =plain: '#{pane_current_path}')"; fi
+if [[ $(tmux display-message -p -t =sorted: '#{@hub-category}') == projects ]]; then pass "back in their category"; else fail "sorted lost its category"; fi
+if [[ $(tmux display-message -p -t =out: '#{@hub-category}') == - ]]; then pass "moved out of every category: still out"; else fail "out is in '$(tmux display-message -p -t =out: '#{@hub-category}')'"; fi
+if [[ -z $(tmux display-message -p -t =plain: '#{@hub-category}') ]]; then pass "never moved: its folder still decides"; else fail "plain got category '$(tmux display-message -p -t =plain: '#{@hub-category}')'"; fi
+line=$(tmux capture-pane -p -t =agent: | grep -F 'claude --resume abc-123')
+if [[ -n $line ]]; then pass "the agent's resume command is typed"; else fail "agent shows: $(tmux capture-pane -p -t =agent:)"; fi
+sleep 0.5
+if [[ $(tmux capture-pane -p -t =agent: | grep -c .) -le 2 && $(tmux display-message -p -t =agent: '#{pane_current_command}') != claude ]]
+then pass "but not run"; else fail "it ran: $(tmux capture-pane -p -t =agent:)"; fi
+if [[ $(tmux display-message -p -t =agent: '#{@hub-resume}') == 'claude abc-123' ]]; then pass "and still remembered, for the next restart"; else fail "the restored session forgot its conversation"; fi
+if [[ $(head -1 "$saved") == $'boot\tboot-2' ]]; then pass "the list now belongs to this boot"; else fail "the list's boot: $(head -1 "$saved")"; fi
+
+tmux kill-session -t =plain
+tmux kill-session -t =out
+HUB_STATE_BOOT=boot-2 bin/hub-state save
+tmux kill-session -t =sorted
+HUB_STATE_BOOT=boot-2 bin/hub-state restore
+if ! tmux has-session -t =sorted 2>/dev/null; then pass "only once per boot"; else fail "restored twice in one boot"; fi
+tmux kill-session -t =agent
+HUB_STATE_BOOT=boot-3 bin/hub-state restore
+if [[ $(tmux ls -F '#S' | sort | tr '\n' ' ') == 'agent t ' ]]; then pass "sessions ended on purpose stay ended; the rest come back"
+else fail "after the next restart: $(tmux ls -F '#S' | tr '\n' ' ')"; fi
+
+# shellcheck disable=SC2016  # on purpose: code that would run if the list were run as code
+printf 'boot\told\nsession\t$(touch %s)\t/\t-\t-\nsession\tbad1\t/tmp\t-\tclaude ;touch %s\nsession\t-x\t/tmp\t-\t-\n' \
+  "$dir/pwned" "$dir/pwned" >"$saved"
+HUB_STATE_BOOT=boot-4 bin/hub-state restore
+sleep 0.5
+if [[ ! -e $dir/pwned ]] && ! tmux has-session -t '=-x' 2>/dev/null && ! tmux capture-pane -p -t =bad1: | grep -qF touch
+then pass "a tampered list runs nothing"; else fail "a tampered list did something"; fi
+for s in agent sorted bad1; do tmux kill-session -t "=$s" 2>/dev/null; done
 
 if env -u TMUX -u TMUX_PANE bin/hub-state hook <<<'{}'; then pass "outside tmux: does nothing"; else fail "outside tmux: failed"; fi
 bin/hub-state bogus 2>/dev/null

@@ -3,13 +3,14 @@
 #   ./install.sh              install from this checkout (again after any change or config edit)
 #   ./install.sh --pull       git pull first (how another machine picks up changes)
 #   ./install.sh --uninstall  stop the services and remove everything except your config
-#   ./install.sh --no-services   the files only: on the other machines (hub-state, share, the tmux
+#   ./install.sh --no-services   no page: on the other machines (hub-state, share, the tmux
 #                                settings), or to run ttyd and server.py yourself (as in systemd/)
 #
 # Puts terminal-hub, share and hub-state in ~/.local/bin and the page, the tmux settings and the
 # OpenCode plugin in ~/.local/share/terminal-hub, and runs two systemd user services: ttyd (the
 # page and its terminals) on 127.0.0.1:HUB_PORT (7682), and server.py (the page's files and the
 # session list) on the next port. Publishing them, say with `tailscale serve`, is up to you.
+# Every machine also gets terminal-hub-restore, which brings sessions back after a restart.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -18,6 +19,7 @@ SHARE=$HOME/.local/share/terminal-hub
 BIN=$HOME/.local/bin
 UNITS=$HOME/.config/systemd/user
 SERVICES=(terminal-hub.service terminal-hub-assets.service)
+RESTORE=terminal-hub-restore.service
 # systemctl --user finds the user's manager through this; it's unset under `sudo -u`.
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 
@@ -27,21 +29,22 @@ case ${1:-} in
   --no-services) services=0 ;;
   --pull)
     git pull --ff-only --quiet
-    exec ./install.sh
+    exec ./install.sh "${@:2}"
     ;;
   --uninstall)
-    systemctl --user disable --now "${SERVICES[@]}" 2>/dev/null || true
-    for s in "${SERVICES[@]}"; do rm -f "$UNITS/$s"; done
+    systemctl --user disable --now "${SERVICES[@]}" "$RESTORE" 2>/dev/null || true
+    for s in "${SERVICES[@]}" "$RESTORE"; do rm -f "$UNITS/$s"; done
     systemctl --user daemon-reload
     rm -f "$BIN/terminal-hub" "$BIN/share" "$BIN/hub-state"
     rm -rf "$SHARE"
-    echo "terminal-hub removed. Your config is still in $CONFIG."
+    echo "terminal-hub removed. Your config is still in $CONFIG, the saved session list in"
+    echo "${XDG_STATE_HOME:-$HOME/.local/state}/terminal-hub."
     echo "Also remove: the tailscale serve paths (tailscale serve --set-path / off, and /assets),"
     echo "the source-file line in ~/.tmux.conf, any agent hooks that call hub-state, and the"
     echo "terminal-hub entry in ~/.config/opencode/cli.json."
     exit 0
     ;;
-  *) echo "usage: ./install.sh [--pull | --uninstall | --no-services]" >&2; exit 2 ;;
+  *) echo "usage: ./install.sh [--pull [--no-services] | --uninstall | --no-services]" >&2; exit 2 ;;
 esac
 
 need=(tmux python3)
@@ -160,16 +163,11 @@ mkdir -p "$SHARE/opencode"
 cp integrations/opencode/tui.js "$SHARE/opencode/"  # the OpenCode plugin (docs/agents.md)
 tmux_hint() {
   grep -qs 'terminal-hub/tmux.conf' "$HOME/.tmux.conf" ||
-    echo "optional: add the hub's tmux settings to ~/.tmux.conf (docs/install.md)"
+    echo "optional: add the hub's tmux settings to ~/.tmux.conf (docs/install.md); bringing"\
+      "sessions back after a restart needs them"
 }
 
-if ((!services)); then
-  echo "installed the files (no services): hub-state, share and the tmux settings are ready"
-  tmux_hint
-  exit 0
-fi
-
-# The services, made for this machine: systemd looks for programs only in the system folders, so
+# The units, made for this machine: systemd looks for programs only in the system folders, so
 # they get the full paths of ttyd and python3 found above, a PATH with the folders of the tools
 # terminal-hub runs, and HUB_PORT. ttyd re-reads the page for each visit, so only a changed unit
 # needs a restart (which drops open hub tabs; the tmux sessions carry on).
@@ -177,19 +175,49 @@ path=$BIN
 add_path() { [[ -z $1 || :$path: == *:"$1":* ]] || path+=:$1; }
 for t in ttyd tmux python3 ssh; do p=$(command -v "$t") && add_path "${p%/*}"; done
 for d in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do add_path "$d"; done
+# On WSL, Windows' folders last, as WSL adds them in an ordinary terminal (unless wsl.conf turns
+# that off), so shells the hub opens can run Windows programs too. Read from Windows itself: the
+# shell running this may lack them. A folder with % in it was never expanded, and systemd would
+# take the % for its own.
+if [[ -e /proc/sys/fs/binfmt_misc/WSLInterop && -x /mnt/c/Windows/System32/cmd.exe ]] &&
+  ! grep -qiE '^[[:space:]]*appendWindowsPath[[:space:]]*=[[:space:]]*false' /etc/wsl.conf 2>/dev/null; then
+  IFS=';' read -ra win < <(cd /mnt/c && timeout 10 ./Windows/System32/cmd.exe /d /c 'echo %PATH%' 2>/dev/null | tr -d '\r\n') || true
+  for d in "${win[@]}"; do
+    [[ -n $d && $d != *[%\"]* ]] && d=$(wslpath -u "$d" 2>/dev/null) && [[ -d $d ]] && add_path "$d"
+  done
+fi
 render() {
   sed -e "s|^ExecStart=ttyd |ExecStart=$(command -v ttyd) |; s|--port 7682 |--port $HUB_PORT |" \
     -e "s|^ExecStart=python3 |ExecStart=$(command -v python3) |; s|server.py 7683 |server.py $((HUB_PORT + 1)) |" \
     -e "/^\[Service\]/a Environment=\"PATH=$path\"" "$1"
 }
+# put UNIT: write UNIT for this machine; fails if it was already so.
+put() {
+  local dest=$UNITS/$1
+  render "systemd/$1" >"$dest.new"
+  if cmp -s "$dest.new" "$dest"; then rm "$dest.new"; return 1; fi
+  mv "$dest.new" "$dest"
+}
+
+# terminal-hub-restore, on every machine with a systemd user manager: after a restart it brings
+# back the sessions it ended, once tmux has the hub's settings (docs/install.md).
+if systemctl --user show-environment >/dev/null 2>&1; then
+  mkdir -p "$UNITS"
+  put "$RESTORE" && systemctl --user daemon-reload
+  systemctl --user enable --quiet "$RESTORE"
+  systemctl --user start "$RESTORE"
+fi
+
+if ((!services)); then
+  echo "installed the files (no page): hub-state, share and the tmux settings are ready"
+  tmux_hint
+  exit 0
+fi
+
 mkdir -p "$UNITS"
 restart=0 fresh=0
 [[ -f $UNITS/terminal-hub.service ]] || fresh=1
-for unit in systemd/*.service; do
-  dest=$UNITS/${unit##*/}
-  render "$unit" >"$dest.new"
-  if cmp -s "$dest.new" "$dest"; then rm "$dest.new"; else mv "$dest.new" "$dest"; restart=1; fi
-done
+for unit in "${SERVICES[@]}"; do put "$unit" && restart=1; done
 systemctl --user daemon-reload
 systemctl --user enable --quiet "${SERVICES[@]}"
 if ((restart)); then

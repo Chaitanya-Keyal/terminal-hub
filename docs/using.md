@@ -96,6 +96,19 @@ notifications only to installed apps).
 does the same on the first place, `/?arg=new` starts a new shell there, and `/?arg=KEY:new` starts
 one on place KEY.
 
+## After a restart
+
+When a machine restarts, its sessions come back (with the hub's tmux settings, see
+[install.md](install.md#tmux-settings)): same name, folder and category, each a fresh shell. One
+that was running Claude Code or OpenCode has the command to pick that conversation up typed at
+its prompt, `claude --resume ID` or `opencode --session ID`; press Enter to run it, or clear it.
+Nothing starts by itself. Sessions you ended stay ended, and other windows in a session don't come
+back, only its first.
+
+The list is saved whenever a session starts, ends or is renamed, and when you leave one, in
+`~/.local/state/terminal-hub/sessions` on each machine. `terminal-hub-restore` brings it back once
+per boot, or the first tmux event after the boot does, whichever comes first.
+
 ## share
 
 ```sh

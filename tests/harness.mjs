@@ -45,8 +45,9 @@ export async function startHub({ places, extraConfig = [], homeFiles = {} }) {
   mkdirSync(join(home, '.config/terminal-hub'), { recursive: true });
   writeFileSync(join(home, '.config/terminal-hub/config'), [...lines, ...extraConfig].join('\n') + '\n');
   // Without TMUX and TMUX_PANE: run from inside tmux, they'd point every tmux command here (even
-  // kill-server) at your own tmux server instead of the test places.
-  const { TMUX, TMUX_PANE, ...outside } = process.env;
+  // kill-server) at your own tmux server instead of the test places. Without the session bus,
+  // install.sh can't reach your own systemd either.
+  const { TMUX, TMUX_PANE, DBUS_SESSION_BUS_ADDRESS, ...outside } = process.env;
   const env = { ...outside, HOME: home, TERM: 'xterm-256color', XDG_RUNTIME_DIR: home };
   execFileSync(join(REPO, 'install.sh'), ['--no-services'], { env, stdio: 'ignore' });
 

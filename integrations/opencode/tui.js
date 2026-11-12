@@ -16,17 +16,27 @@ export default Plugin.define({
     if (!process.env.TMUX || !process.env.TMUX_PANE) return;  // not in tmux: nothing to mark
 
     // hub-state runs one at a time, in order, and only when the mark changes.
-    let marked = '', queue = Promise.resolve();
-    const mark = state => {
-      if (state === marked) return;
-      marked = state;
+    let marked = '', remembered = '', queue = Promise.resolve();
+    const run = args => {
       queue = queue.then(() => new Promise(resolve => {
         try {
-          const p = spawn(HUB_STATE, [state], { stdio: 'ignore' });
+          const p = spawn(HUB_STATE, args, { stdio: 'ignore' });
           p.on('exit', resolve);
           p.on('error', resolve);
         } catch { resolve(); }
       }));
+    };
+    const mark = state => {
+      if (state === marked) return;
+      marked = state;
+      run([state]);
+    };
+    // The conversation on screen is the one this session resumes after a restart.
+    const remember = () => {
+      const route = ctx.ui.router.current();
+      if (route.type !== 'session' || route.sessionID === remembered) return;
+      remembered = route.sessionID;
+      run(['resume', 'opencode', remembered]);
     };
 
     // The sessions this terminal shows: its tabs, or the session on screen.
@@ -55,6 +65,7 @@ export default Plugin.define({
     let busy = [], settle;
     const update = () => {
       const tabs = shown();
+      remember();
       clearTimeout(settle);
       if (tabs.some(t => t.attention)) return mark('waiting');
       const now = tabs.filter(t => t.busy).map(t => t.sessionID);

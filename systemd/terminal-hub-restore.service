@@ -1,0 +1,12 @@
+[Unit]
+Description=terminal-hub: bring back the tmux sessions a restart ended (hub-state restore)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/hub-state restore
+# Stays "active", and stopping it ends only that command: the tmux server it starts lives on.
+RemainAfterExit=yes
+KillMode=process
+
+[Install]
+WantedBy=default.target
